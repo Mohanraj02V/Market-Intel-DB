@@ -68,8 +68,12 @@ class MailAccountViewSet(viewsets.ReadOnlyModelViewSet):
                 
             server.login(mail_account.smtp_username, password)
             server.quit()
+            mail_account.smtp_status = 'VERIFIED'
+            mail_account.save()
             return Response({'message': 'SMTP connection successful.'})
         except Exception as e:
+            mail_account.smtp_status = 'FAILED'
+            mail_account.save()
             return Response({'error': 'Unable to connect to SMTP server. Please verify the configuration.'}, status=status.HTTP_400_BAD_REQUEST)
 
     @action(detail=False, methods=['post'], url_path='test-imap')
@@ -88,6 +92,10 @@ class MailAccountViewSet(viewsets.ReadOnlyModelViewSet):
                 
             server.login(mail_account.imap_username, password)
             server.logout()
+            mail_account.imap_status = 'CONNECTED'
+            mail_account.save()
             return Response({'message': 'IMAP connection successful.'})
         except Exception as e:
+            mail_account.imap_status = 'FAILED'
+            mail_account.save()
             return Response({'error': 'Unable to connect to IMAP server. Please verify the configuration.'}, status=status.HTTP_400_BAD_REQUEST)

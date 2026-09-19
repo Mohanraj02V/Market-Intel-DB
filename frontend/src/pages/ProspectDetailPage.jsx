@@ -74,9 +74,9 @@ const ProspectDetailPage = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 space-y-6">
-          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+        <div className="space-y-6">
+<div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
             <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50">
               <h3 className="text-lg font-medium text-slate-800 flex items-center gap-2">
                 <Building2 size={20} className="text-indigo-500" /> General Information
@@ -92,30 +92,80 @@ const ProspectDetailPage = () => {
                 <dd className="mt-1 text-sm text-slate-900">{p.primary_industries}</dd>
               </div>
               
-              <div className="md:col-span-2 grid grid-cols-1 sm:grid-cols-3 gap-4 pt-4 border-t border-slate-100">
+              <div className="md:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4 border-t border-slate-100">
                 {p.official_phone_number && (
                   <div>
                     <dt className="text-xs font-medium text-slate-500 uppercase flex items-center gap-1"><Phone size={14}/> Phone</dt>
-                    <dd className="mt-1 text-sm text-slate-900">{p.official_phone_number}</dd>
+                    <dd className="mt-1 text-sm text-slate-900 break-words">{p.official_phone_number}</dd>
                   </div>
                 )}
                 {p.official_email_address && (
-                  <div>
+                  <div className="overflow-hidden">
                     <dt className="text-xs font-medium text-slate-500 uppercase flex items-center gap-1"><Mail size={14}/> Email</dt>
-                    <dd className="mt-1 text-sm text-indigo-600"><a href={`mailto:${p.official_email_address}`}>{p.official_email_address}</a></dd>
+                    <dd className="mt-1 text-sm text-indigo-600 break-all"><a href={`mailto:${p.official_email_address}`}>{p.official_email_address}</a></dd>
                   </div>
                 )}
                 {p.official_website_url && (
-                  <div>
+                  <div className="sm:col-span-2 lg:col-span-1 overflow-hidden">
                     <dt className="text-xs font-medium text-slate-500 uppercase flex items-center gap-1"><Globe size={14}/> Website</dt>
-                    <dd className="mt-1 text-sm text-indigo-600"><a href={p.official_website_url} target="_blank" rel="noopener noreferrer">{p.official_website_url}</a></dd>
+                    <dd className="mt-1 text-sm text-indigo-600 break-all"><a href={p.official_website_url} target="_blank" rel="noopener noreferrer">{p.official_website_url}</a></dd>
                   </div>
                 )}
               </div>
             </div>
           </div>
-
-          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+<div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50">
+              <h3 className="text-lg font-medium text-slate-800 flex items-center gap-2">
+                <Users size={20} className="text-indigo-500" /> Key Contacts
+              </h3>
+            </div>
+            <div className="p-6 space-y-4">
+              {p.key_contacts && p.key_contacts.length > 0 ? (
+                p.key_contacts.map((contact, i) => (
+                  <div key={i} className="p-3 bg-slate-50 rounded-lg border border-slate-100">
+                    <div className="font-medium text-sm text-slate-900">{contact.contact_name}</div>
+                    <div className="text-xs text-slate-500 mb-2">{contact.designation || 'No designation'}</div>
+                    {contact.official_email && <div className="text-xs text-slate-600"><a href={`mailto:${contact.official_email}`} className="hover:text-indigo-600">{contact.official_email}</a></div>}
+                    {contact.phone_number && <div className="text-xs text-slate-600">{contact.phone_number}</div>}
+                  </div>
+                ))
+              ) : (
+                <div className="text-sm text-slate-500 italic">No contacts added.</div>
+              )}
+            </div>
+          </div>
+        </div>
+        <div className="space-y-6">
+<div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50">
+              <h3 className="text-lg font-medium text-slate-800 flex items-center gap-2">
+                <Network size={20} className="text-indigo-500" /> Corporate Structure
+              </h3>
+            </div>
+            <div className="p-6">
+              <div className="mb-4">
+                <dt className="text-xs font-medium text-slate-500 uppercase mb-1">Structure Type</dt>
+                <dd className="text-sm font-medium text-slate-900">{p.company_structure}</dd>
+              </div>
+              
+              {p.parent_companies && p.parent_companies.length > 0 && (
+                <div className="mt-4 pt-4 border-t border-slate-100">
+                  <dt className="text-xs font-medium text-slate-500 uppercase mb-2">Parent Companies</dt>
+                  <dd className="space-y-2">
+                    {p.parent_companies.map((parentId, i) => (
+                      <div key={i} className="text-sm text-indigo-600 font-medium">
+                        <Link to={`/prospects/${parentId}`} className="hover:underline flex items-center gap-1">
+                          <Building2 size={14} /> View Parent Record
+                        </Link>
+                      </div>
+                    ))}
+                  </dd>
+                </div>
+              )}
+            </div>
+          </div>
+<div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
             <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50">
               <h3 className="text-lg font-medium text-slate-800 flex items-center gap-2">
                 <Package size={20} className="text-indigo-500" /> Market Offerings
@@ -158,39 +208,7 @@ const ProspectDetailPage = () => {
               )}
             </div>
           </div>
-        </div>
-
-        <div className="space-y-6">
-          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-            <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50">
-              <h3 className="text-lg font-medium text-slate-800 flex items-center gap-2">
-                <Network size={20} className="text-indigo-500" /> Corporate Structure
-              </h3>
-            </div>
-            <div className="p-6">
-              <div className="mb-4">
-                <dt className="text-xs font-medium text-slate-500 uppercase mb-1">Structure Type</dt>
-                <dd className="text-sm font-medium text-slate-900">{p.company_structure}</dd>
-              </div>
-              
-              {p.parent_companies && p.parent_companies.length > 0 && (
-                <div className="mt-4 pt-4 border-t border-slate-100">
-                  <dt className="text-xs font-medium text-slate-500 uppercase mb-2">Parent Companies</dt>
-                  <dd className="space-y-2">
-                    {p.parent_companies.map((parentId, i) => (
-                      <div key={i} className="text-sm text-indigo-600 font-medium">
-                        <Link to={`/prospects/${parentId}`} className="hover:underline flex items-center gap-1">
-                          <Building2 size={14} /> View Parent Record
-                        </Link>
-                      </div>
-                    ))}
-                  </dd>
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+<div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
             <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50">
               <h3 className="text-lg font-medium text-slate-800 flex items-center gap-2">
                 <Calendar size={20} className="text-indigo-500" /> Market Events
@@ -213,29 +231,16 @@ const ProspectDetailPage = () => {
               )}
             </div>
           </div>
-
-          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-            <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50">
-              <h3 className="text-lg font-medium text-slate-800 flex items-center gap-2">
-                <Users size={20} className="text-indigo-500" /> Key Contacts
-              </h3>
-            </div>
-            <div className="p-6 space-y-4">
-              {p.key_contacts && p.key_contacts.length > 0 ? (
-                p.key_contacts.map((contact, i) => (
-                  <div key={i} className="p-3 bg-slate-50 rounded-lg border border-slate-100">
-                    <div className="font-medium text-sm text-slate-900">{contact.contact_name}</div>
-                    <div className="text-xs text-slate-500 mb-2">{contact.designation || 'No designation'}</div>
-                    {contact.official_email && <div className="text-xs text-slate-600"><a href={`mailto:${contact.official_email}`} className="hover:text-indigo-600">{contact.official_email}</a></div>}
-                    {contact.phone_number && <div className="text-xs text-slate-600">{contact.phone_number}</div>}
-                  </div>
-                ))
-              ) : (
-                <div className="text-sm text-slate-500 italic">No contacts added.</div>
-              )}
-            </div>
-          </div>
         </div>
+      </div>
+      
+      {/* Branch Visualization Structure */}
+      <div className="mt-8">
+        <h2 className="text-xl font-bold text-slate-900 mb-4 flex items-center gap-2">
+          <Network className="h-6 w-6 text-indigo-600" />
+          Branch Visualization Structure
+        </h2>
+        <CorporateStructureTree prospect={p} />
       </div>
     </div>
   );

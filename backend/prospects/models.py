@@ -229,3 +229,54 @@ class CommunicationActivity(models.Model):
     call_activity = models.ForeignKey(CallActivity, on_delete=models.SET_NULL, null=True, blank=True)
     performed_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+
+class EmailVerification(models.Model):
+    class VerificationStatus(models.TextChoices):
+        UNVERIFIED = 'UNVERIFIED', 'Unverified'
+        VALID = 'VALID', 'Valid'
+        INVALID = 'INVALID', 'Invalid'
+        UNKNOWN = 'UNKNOWN', 'Unknown'
+
+    class VerificationMethod(models.TextChoices):
+        SYNTAX = 'SYNTAX', 'Syntax'
+        DNS = 'DNS', 'DNS'
+        MX = 'MX', 'MX'
+        SMTP = 'SMTP', 'SMTP'
+        COMBINED = 'COMBINED', 'Combined'
+        MANUAL_CONFIRMATION = 'MANUAL_CONFIRMATION', 'Manual Confirmation'
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    prospect = models.ForeignKey(Prospect, on_delete=models.CASCADE, related_name='email_verifications')
+    prospect_contact = models.ForeignKey(ProspectContact, on_delete=models.CASCADE, null=True, blank=True, related_name='email_verifications')
+    email_address = models.EmailField()
+    verification_status = models.CharField(max_length=50, choices=VerificationStatus.choices, default=VerificationStatus.UNVERIFIED)
+    verification_method = models.CharField(max_length=50, choices=VerificationMethod.choices, default=VerificationMethod.COMBINED)
+
+    syntax_valid = models.BooleanField(default=False)
+    domain_valid = models.BooleanField(default=False)
+    mx_found = models.BooleanField(default=False)
+    smtp_checked = models.BooleanField(default=False)
+    smtp_valid = models.BooleanField(default=False)
+
+    is_disposable = models.BooleanField(default=False)
+    is_role_account = models.BooleanField(default=False)
+    is_catch_all = models.BooleanField(default=False)
+
+    reason = models.TextField(blank=True, null=True)
+
+    verified_at = models.DateTimeField(null=True, blank=True)
+    verified_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='verifications_performed')
+    
+    confirmed_by_lq = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='verifications_confirmed')
+    confirmed_at = models.DateTimeField(null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['prospect', 'prospect_contact', 'email_address'], name='unique_prospect_contact_email_verification')
+        ]
+
+    def __str__(self):
+        return f"{self.email_address} - {self.verification_status}"

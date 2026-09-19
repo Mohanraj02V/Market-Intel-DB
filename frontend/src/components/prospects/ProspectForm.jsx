@@ -40,7 +40,7 @@ const ProspectForm = ({ isOpen, onClose, prospect = null, highlightFields = [], 
       // Fetch all prospects for parent/target dropdowns
       api.get('/prospects/?limit=1000').then(res => {
         const options = res.data.results || res.data;
-        setParentOptions(options.filter(p => p.id !== prospect?.id));
+        setParentOptions(options.filter(p => p.id !== prospect?.id && p.company_structure === 'Parent'));
         setTargetOptions(options.filter(p => p.id !== prospect?.id));
       });
     }
@@ -100,9 +100,11 @@ const ProspectForm = ({ isOpen, onClose, prospect = null, highlightFields = [], 
   };
 
   const handleOfferingChange = (type, index, value) => {
-    const newOfferings = [...formData[type]];
-    newOfferings[index].name = value;
-    setFormData(prev => ({ ...prev, [type]: newOfferings }));
+    setFormData(prev => {
+      const newOfferings = [...prev[type]];
+      newOfferings[index] = { ...newOfferings[index], name: value };
+      return { ...prev, [type]: newOfferings };
+    });
   };
 
   const handleRemoveOffering = (type, index) => {
@@ -118,9 +120,11 @@ const ProspectForm = ({ isOpen, onClose, prospect = null, highlightFields = [], 
   };
 
   const handleContactChange = (index, field, value) => {
-    const newContacts = [...formData.key_contacts];
-    newContacts[index][field] = value;
-    setFormData(prev => ({ ...prev, key_contacts: newContacts }));
+    setFormData(prev => {
+      const newContacts = [...prev.key_contacts];
+      newContacts[index] = { ...newContacts[index], [field]: value };
+      return { ...prev, key_contacts: newContacts };
+    });
   };
 
   const handleRemoveContact = (index) => {

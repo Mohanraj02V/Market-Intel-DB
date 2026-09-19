@@ -50,6 +50,12 @@ export default function LqWorkspaceModal({
   const [emailBody, setEmailBody] = useState(`Dear ${prospect.company_name || 'Team'},\n\nWe are pleased to introduce our solution portfolio tailored for ${prospect.primary_industries || 'your industry'}. We would love to schedule a brief introductory discussion to explore potential alignment.\n\nBest regards,\nLead Qualification Team`);
   const [attachments, setAttachments] = useState([]);
   const [attachmentError, setAttachmentError] = useState('');
+  
+  // Verification States
+  const [emailVerifications, setEmailVerifications] = useState({});
+  const [verifyingEmail, setVerifyingEmail] = useState(null);
+  const [isSendingEmail, setIsSendingEmail] = useState(false);
+  const [senderMailStatus, setSenderMailStatus] = useState(null);
 
   // Call Outcome State
   const [callStatus, setCallStatus] = useState('Connected');
@@ -117,6 +123,22 @@ export default function LqWorkspaceModal({
       
       // Also fetch outreach logs immediately on open (not just on tab switch)
       fetchOutreachLogs();
+      
+      // Fetch verifications
+      api.get(`/email-verifications/?prospect=${prospect.id}`)
+        .then(res => {
+          const vMap = {};
+          res.data.forEach(v => { vMap[v.email_address] = v; });
+          setEmailVerifications(vMap);
+        }).catch(err => console.error('Failed to fetch verifications', err));
+        
+      // Fetch sender mail account status
+      api.get('/mail-account/')
+        .then(res => {
+          if(res.data && res.data.length > 0) {
+            setSenderMailStatus(res.data[0]);
+          }
+        }).catch(err => console.error('Failed to fetch mail account', err));
     }
   }, [selectedLq?.id]);
   
@@ -187,6 +209,33 @@ export default function LqWorkspaceModal({
     else setCcEmails([...ccEmails, email]);
   };
 
+  const handleVerifyEmail = async (email, contactId = null) => {
+    setVerifyingEmail(email);
+    try {
+      const res = await api.post('/email-verifications/verify/', {
+        prospect_id: prospect.id,
+        prospect_contact_id: contactId,
+        email_address: email
+      });
+      setEmailVerifications(prev => ({ ...prev, [email]: res.data }));
+      toast.success(res.data.verification_status === 'VALID' ? 'Email verified successfully!' : 'Email verification completed with warnings.');
+    } catch (err) {
+      toast.error('Verification failed. ' + (err.response?.data?.error || ''));
+    } finally {
+      setVerifyingEmail(null);
+    }
+  };
+
+  const handleConfirmEmail = async (verificationId, email) => {
+    try {
+      const res = await api.post(`/email-verifications/${verificationId}/confirm/`);
+      setEmailVerifications(prev => ({ ...prev, [email]: res.data }));
+      toast.success('Email confirmed for outreach.');
+    } catch (err) {
+      toast.error('Failed to confirm email. ' + (err.response?.data?.error || ''));
+    }
+  };
+
   const handleAddCustomRecipient = (e) => {
     e.preventDefault();
     const em = customRecipientInput.trim();
@@ -232,11 +281,10 @@ export default function LqWorkspaceModal({
   const handleSendIntroEmail = async (e) => {
     e.preventDefault();
     if (toEmails.length === 0 && ccEmails.length === 0) return;
-    setEmailProgress('Sent');
-    setEmailCollapsed(true);
+    if (isSendingEmail) return;
     
+    setIsSendingEmail(true);
     try {
-      await api.patch(`/lq-pipeline/${selectedLq.id}/`, { email_status: 'Sent' });
       const formData = new FormData();
       formData.append('prospect', prospect.id);
       formData.append('subject', emailSubject);
@@ -252,12 +300,20 @@ export default function LqWorkspaceModal({
         formData.append('attachments', file);
       });
       
-      await dispatch(sendOutreachEmail(formData)).unwrap();
+      const res = await dispatch(sendOutreachEmail(formData)).unwrap();
+      
+      // Update UI explicitly on success
+      setEmailProgress('Waiting for Response');
+      setEmailCollapsed(true);
+      
       fetchOutreachLogs();
       toast.success("Email sent successfully!");
     } catch (err) {
       console.error("Failed to log email", err);
-      toast.error("Failed to send email.");
+      const errorMsg = err.error || err.detail || (typeof err === 'string' ? err : JSON.stringify(err));
+      toast.error("Failed to send email: " + errorMsg);
+    } finally {
+      setIsSendingEmail(false);
     }
   };
 
@@ -696,11 +752,17 @@ export default function LqWorkspaceModal({
                               const toastId = toast.loading('Checking for replies...');
                               try {
                                 await dispatch(syncImap()).unwrap();
-                                setTimeout(async () => {
-                                  await fetchOutreachLogs();
-                                  toast.dismiss(toastId);
-                                  toast.success('Inbox synced!');
-                                }, 2500);
+                                await fetchOutreachLogs();
+                                try {
+                                  const res = await api.get(`/lq-pipeline/${selectedLq.id}/`);
+                                  if (res.data?.email_status) {
+                                    setEmailProgress(res.data.email_status);
+                                  }
+                                } catch (e) {
+                                  console.error("Failed to refresh pipeline status after sync", e);
+                                }
+                                toast.dismiss(toastId);
+                                toast.success('Inbox synced!');
                               } catch (err) {
                                 toast.dismiss(toastId);
                                 toast.error('Sync failed.');
@@ -722,23 +784,83 @@ export default function LqWorkspaceModal({
                           <label className="block font-extrabold text-slate-800 uppercase tracking-wider text-[10px]">Select Introduction Email Recipients</label>
                           <div className="grid grid-cols-1 gap-2">
                             {prospect?.key_contacts?.map(contact => contact.official_email && (
-                              <label key={contact.id} className={`flex items-center gap-2.5 p-2.5 rounded-xl border transition cursor-pointer ${toEmails.includes(contact.official_email) ? 'bg-indigo-50 border-indigo-300 text-indigo-950 font-bold' : 'bg-white border-slate-200 text-slate-700'}`}>
-                                <input type="checkbox" checked={toEmails.includes(contact.official_email)} onChange={() => toggleToRecipient(contact.official_email)} className="accent-indigo-600" />
-                                <div className="overflow-hidden">
-                                  <span className="block truncate text-sm">{contact.official_email}</span>
-                                  <span className="text-[10px] text-slate-400 font-semibold">{contact.contact_name} ({contact.designation}) - TO</span>
+                              <div key={contact.id} className={`flex flex-col gap-2 p-2.5 rounded-xl border transition ${toEmails.includes(contact.official_email) ? 'bg-indigo-50 border-indigo-300' : 'bg-white border-slate-200'}`}>
+                                <label className="flex items-center gap-2.5 cursor-pointer">
+                                  <input type="checkbox" checked={toEmails.includes(contact.official_email)} onChange={() => toggleToRecipient(contact.official_email)} disabled={isEmailSent} className="accent-indigo-600 disabled:opacity-50" />
+                                  <div className="overflow-hidden flex-1">
+                                    <span className={`block truncate text-sm ${toEmails.includes(contact.official_email) ? 'text-indigo-950 font-bold' : 'text-slate-700'}`}>{contact.official_email}</span>
+                                    <span className="text-[10px] text-slate-400 font-semibold">{contact.contact_name} ({contact.designation}) - TO</span>
+                                  </div>
+                                </label>
+                                <div className="flex items-center gap-2 pl-6">
+                                  {emailVerifications[contact.official_email] ? (
+                                    <>
+                                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
+                                        emailVerifications[contact.official_email].verification_status === 'VALID' ? 'bg-emerald-100 text-emerald-700' :
+                                        emailVerifications[contact.official_email].verification_status === 'INVALID' ? 'bg-red-100 text-red-700' :
+                                        emailVerifications[contact.official_email].verification_status === 'UNKNOWN' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-700'
+                                      }`}>
+                                        {emailVerifications[contact.official_email].verification_status}
+                                      </span>
+                                      {emailVerifications[contact.official_email].verification_status === 'VALID' && !emailVerifications[contact.official_email].confirmed_by_lq && (
+                                        <button type="button" onClick={() => handleConfirmEmail(emailVerifications[contact.official_email].id, contact.official_email)} className="text-[10px] bg-indigo-600 text-white px-2 py-0.5 rounded-md font-bold hover:bg-indigo-700">Confirm</button>
+                                      )}
+                                      {emailVerifications[contact.official_email].confirmed_by_lq && (
+                                        <span className="text-[10px] text-emerald-600 font-bold flex items-center gap-1">✓ Confirmed</span>
+                                      )}
+                                      {emailVerifications[contact.official_email].verification_status !== 'VALID' && (
+                                        <button type="button" onClick={() => handleVerifyEmail(contact.official_email, contact.id)} disabled={verifyingEmail === contact.official_email} className="text-[10px] bg-slate-200 text-slate-700 px-2 py-0.5 rounded-md font-bold hover:bg-slate-300">
+                                          {verifyingEmail === contact.official_email ? '...' : 'Reverify'}
+                                        </button>
+                                      )}
+                                    </>
+                                  ) : (
+                                    <button type="button" onClick={() => handleVerifyEmail(contact.official_email, contact.id)} disabled={verifyingEmail === contact.official_email} className="text-[10px] bg-slate-800 text-white px-2 py-0.5 rounded-md font-bold hover:bg-slate-900 transition">
+                                      {verifyingEmail === contact.official_email ? 'Verifying...' : 'Verify Email'}
+                                    </button>
+                                  )}
                                 </div>
-                              </label>
+                              </div>
                             ))}
                             
                             {prospect?.official_email_address && (
-                              <label className={`flex items-center gap-2.5 p-2.5 rounded-xl border transition cursor-pointer ${ccEmails.includes(prospect.official_email_address) ? 'bg-indigo-50 border-indigo-300 text-indigo-950 font-bold' : 'bg-white border-slate-200 text-slate-700'}`}>
-                                <input type="checkbox" checked={ccEmails.includes(prospect.official_email_address)} onChange={() => toggleCcRecipient(prospect.official_email_address)} className="accent-indigo-600" />
-                                <div className="overflow-hidden">
-                                  <span className="block truncate text-sm">{prospect.official_email_address}</span>
-                                  <span className="text-[10px] text-slate-400 font-semibold">Reception / Official Email - CC</span>
+                              <div className={`flex flex-col gap-2 p-2.5 rounded-xl border transition ${ccEmails.includes(prospect.official_email_address) ? 'bg-indigo-50 border-indigo-300' : 'bg-white border-slate-200'}`}>
+                                <label className="flex items-center gap-2.5 cursor-pointer">
+                                  <input type="checkbox" checked={ccEmails.includes(prospect.official_email_address)} onChange={() => toggleCcRecipient(prospect.official_email_address)} disabled={isEmailSent} className="accent-indigo-600 disabled:opacity-50" />
+                                  <div className="overflow-hidden flex-1">
+                                    <span className={`block truncate text-sm ${ccEmails.includes(prospect.official_email_address) ? 'text-indigo-950 font-bold' : 'text-slate-700'}`}>{prospect.official_email_address}</span>
+                                    <span className="text-[10px] text-slate-400 font-semibold">Reception / Official Email - CC</span>
+                                  </div>
+                                </label>
+                                <div className="flex items-center gap-2 pl-6">
+                                  {emailVerifications[prospect.official_email_address] ? (
+                                    <>
+                                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
+                                        emailVerifications[prospect.official_email_address].verification_status === 'VALID' ? 'bg-emerald-100 text-emerald-700' :
+                                        emailVerifications[prospect.official_email_address].verification_status === 'INVALID' ? 'bg-red-100 text-red-700' :
+                                        emailVerifications[prospect.official_email_address].verification_status === 'UNKNOWN' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-700'
+                                      }`}>
+                                        {emailVerifications[prospect.official_email_address].verification_status}
+                                      </span>
+                                      {emailVerifications[prospect.official_email_address].verification_status === 'VALID' && !emailVerifications[prospect.official_email_address].confirmed_by_lq && (
+                                        <button type="button" onClick={() => handleConfirmEmail(emailVerifications[prospect.official_email_address].id, prospect.official_email_address)} className="text-[10px] bg-indigo-600 text-white px-2 py-0.5 rounded-md font-bold hover:bg-indigo-700">Confirm</button>
+                                      )}
+                                      {emailVerifications[prospect.official_email_address].confirmed_by_lq && (
+                                        <span className="text-[10px] text-emerald-600 font-bold flex items-center gap-1">✓ Confirmed</span>
+                                      )}
+                                      {emailVerifications[prospect.official_email_address].verification_status !== 'VALID' && (
+                                        <button type="button" onClick={() => handleVerifyEmail(prospect.official_email_address, null)} disabled={verifyingEmail === prospect.official_email_address} className="text-[10px] bg-slate-200 text-slate-700 px-2 py-0.5 rounded-md font-bold hover:bg-slate-300">
+                                          {verifyingEmail === prospect.official_email_address ? '...' : 'Reverify'}
+                                        </button>
+                                      )}
+                                    </>
+                                  ) : (
+                                    <button type="button" onClick={() => handleVerifyEmail(prospect.official_email_address, null)} disabled={verifyingEmail === prospect.official_email_address} className="text-[10px] bg-slate-800 text-white px-2 py-0.5 rounded-md font-bold hover:bg-slate-900 transition">
+                                      {verifyingEmail === prospect.official_email_address ? 'Verifying...' : 'Verify Email'}
+                                    </button>
+                                  )}
                                 </div>
-                              </label>
+                              </div>
                             )}
                             
                             {(!prospect?.official_email_address && (!prospect?.key_contacts || prospect.key_contacts.length === 0)) && (
@@ -749,7 +871,7 @@ export default function LqWorkspaceModal({
 
                             {ccEmails.filter(email => email !== prospect?.official_email_address).map((email) => (
                               <label key={email} className="flex items-center gap-2.5 p-2.5 rounded-xl border transition cursor-pointer bg-slate-50 border-indigo-200 text-slate-800 font-bold">
-                                <input type="checkbox" checked={true} onChange={() => toggleCcRecipient(email)} className="accent-indigo-600" />
+                                <input type="checkbox" checked={true} onChange={() => toggleCcRecipient(email)} disabled={isEmailSent} className="accent-indigo-600 disabled:opacity-50" />
                                 <div className="overflow-hidden">
                                   <span className="block truncate text-sm">{email}</span>
                                   <span className="text-[10px] text-indigo-500 font-extrabold uppercase">CC</span>
@@ -758,17 +880,22 @@ export default function LqWorkspaceModal({
                             ))}
                           </div>
                           <div className="flex items-center gap-2 pt-1">
-                            <input type="email" value={customRecipientInput} onChange={(e) => setCustomRecipientInput(e.target.value)} placeholder="Add additional email address..." className="flex-1 p-2 bg-white border border-slate-200 rounded-xl text-xs font-medium" />
-                            <button type="button" onClick={handleAddCustomRecipient} className="px-3 py-2 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-xl text-xs cursor-pointer transition">Add Recipient</button>
+                            <input type="email" value={customRecipientInput} onChange={(e) => setCustomRecipientInput(e.target.value)} disabled={isEmailSent} placeholder="Add additional email address..." className="flex-1 p-2 bg-white border border-slate-200 rounded-xl text-xs font-medium disabled:bg-slate-100 disabled:text-slate-500" />
+                            <button type="button" onClick={handleAddCustomRecipient} disabled={isEmailSent} className="px-3 py-2 bg-slate-800 hover:bg-slate-900 disabled:bg-slate-400 disabled:cursor-not-allowed text-white font-bold rounded-xl text-xs cursor-pointer transition">Add Recipient</button>
                           </div>
                         </div>
                         <div>
                           <label className="block font-extrabold text-slate-800 mb-1 uppercase tracking-wider text-[10px]">Email Subject</label>
-                          <input type="text" value={emailSubject} onChange={(e) => setEmailSubject(e.target.value)} className="w-full p-2.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-900 text-xs" />
+                          <input type="text" value={emailSubject} onChange={(e) => setEmailSubject(e.target.value)} disabled={isEmailSent} className="w-full p-2.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-900 text-xs disabled:bg-slate-100 disabled:text-slate-500" />
                         </div>
                         <div>
                           <label className="block font-extrabold text-slate-800 mb-1 uppercase tracking-wider text-[10px]">Email Message Content</label>
-                          <textarea rows={4} value={emailBody} onChange={(e) => setEmailBody(e.target.value)} className="w-full p-3 bg-white border border-slate-200 rounded-xl text-xs font-medium text-slate-800 leading-relaxed focus:outline-none focus:ring-2 focus:ring-indigo-500/20" />
+                          <textarea rows={4} value={emailBody} onChange={(e) => setEmailBody(e.target.value)} disabled={isEmailSent} className="w-full p-3 bg-white border border-slate-200 rounded-t-xl text-xs font-medium text-slate-800 leading-relaxed focus:outline-none focus:ring-2 focus:ring-indigo-500/20 disabled:bg-slate-100 disabled:text-slate-500" />
+                          {senderMailStatus && senderMailStatus.default_signature && (
+                            <div className="w-full p-3 bg-slate-50 border border-t-0 border-slate-200 rounded-b-xl text-xs text-slate-500 whitespace-pre-wrap">
+                              {senderMailStatus.default_signature}
+                            </div>
+                          )}
                         </div>
                         <div>
                           <label className="block font-extrabold text-slate-800 mb-1 uppercase tracking-wider text-[10px]">Attachments</label>
@@ -777,7 +904,8 @@ export default function LqWorkspaceModal({
                               type="file" 
                               multiple 
                               onChange={handleFileChange} 
-                              className="text-xs text-slate-700 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer"
+                              disabled={isEmailSent}
+                              className="text-xs text-slate-700 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                             />
                             {attachmentError && (
                               <div className="text-red-600 text-[10px] font-bold">{attachmentError}</div>
@@ -800,8 +928,8 @@ export default function LqWorkspaceModal({
                           <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-600">
                             <span>Selected Recipients:</span><span className="px-2 py-0.5 rounded bg-indigo-100 text-indigo-800 font-extrabold">{toEmails.length + ccEmails.length} Address(es)</span>
                           </div>
-                          <button type="button" onClick={handleSendIntroEmail} disabled={(toEmails.length === 0 && ccEmails.length === 0) || isEmailSent} className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-black rounded-xl text-xs transition cursor-pointer shadow-sm flex items-center gap-2">
-                            <Mail className="w-4 h-4" /> <span>Send Introduction Email & Mark Sent</span>
+                          <button type="button" onClick={handleSendIntroEmail} disabled={isSendingEmail || (toEmails.length === 0 && ccEmails.length === 0) || isEmailSent || [...toEmails, ...ccEmails].some(e => !emailVerifications[e] || emailVerifications[e].verification_status !== 'VALID' || !emailVerifications[e].confirmed_by_lq)} className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-black rounded-xl text-xs transition cursor-pointer shadow-sm flex items-center gap-2">
+                            <Mail className="w-4 h-4" /> <span>{isSendingEmail ? 'Sending Email...' : 'Send Introduction Email & Mark Sent'}</span>
                           </button>
                         </div>
                       </div>

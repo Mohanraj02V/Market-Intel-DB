@@ -166,9 +166,28 @@ class ProspectSerializer(serializers.ModelSerializer):
                 ProspectOffering.objects.create(prospect=instance, **offering)
                 
         if contacts_data is not None:
-            instance.key_contacts.all().delete()
-            for contact in contacts_data:
-                ProspectContact.objects.create(prospect=instance, **contact)
+            raw_contacts = self.initial_data.get('key_contacts', [])
+            existing_contacts = {str(c.id): c for c in instance.key_contacts.all()}
+            seen_ids = []
+            
+            for i, contact_data in enumerate(contacts_data):
+                raw_id = None
+                if i < len(raw_contacts) and isinstance(raw_contacts[i], dict):
+                    raw_id = str(raw_contacts[i].get('id', ''))
+                
+                if raw_id and raw_id in existing_contacts:
+                    c_inst = existing_contacts[raw_id]
+                    for k, v in contact_data.items():
+                        setattr(c_inst, k, v)
+                    c_inst.save()
+                    seen_ids.append(raw_id)
+                else:
+                    new_c = ProspectContact.objects.create(prospect=instance, **contact_data)
+                    seen_ids.append(str(new_c.id))
+            
+            for c_id, c_inst in existing_contacts.items():
+                if c_id not in seen_ids:
+                    c_inst.delete()
                 
         return instance
 

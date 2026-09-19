@@ -5,7 +5,7 @@ from rest_framework import viewsets, filters, status
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.permissions import IsAuthenticated
-from .models import Prospect, ProspectOffering, ProspectContact, LeadQualification
+from .models import Prospect, ProspectOffering, ProspectContact, LeadQualification, EmailVerification
 from .serializers import ProspectSerializer, LeadQualificationSerializer, ProspectContactSerializer
 
 class ProspectViewSet(viewsets.ModelViewSet):
@@ -239,17 +239,12 @@ class OutreachEmailViewSet(viewsets.ModelViewSet):
             raise PermissionDenied("Only LQ users can sync emails.")
         
         from django.core.management import call_command
-        import threading
         
-        def run_sync():
-            try:
-                call_command('sync_imap')
-            except Exception as e:
-                print(f"Error running sync_imap: {e}")
-                
-        threading.Thread(target=run_sync).start()
-        
-        return Response({'message': 'IMAP Sync started in the background. Please wait a few seconds and refresh.'}, status=status.HTTP_200_OK)
+        try:
+            call_command('sync_imap')
+            return Response({'message': 'IMAP Sync completed successfully.'}, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({'error': f"Error running sync_imap: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     serializer_class = OutreachEmailSerializer
     
@@ -272,6 +267,9 @@ class OutreachEmailViewSet(viewsets.ModelViewSet):
         if not mail_account:
             return Response({'error': 'No active mail account found for the current user.'}, status=status.HTTP_400_BAD_REQUEST)
         
+        if mail_account.smtp_status != 'VERIFIED':
+            return Response({'error': 'Sender SMTP account is not verified.'}, status=status.HTTP_400_BAD_REQUEST)
+        
         prospect_id = request.data.get('prospect')
         subject = request.data.get('subject')
         body = request.data.get('body') or ''
@@ -290,9 +288,25 @@ class OutreachEmailViewSet(viewsets.ModelViewSet):
         if isinstance(recipients_data, str):
             recipients_data = json.loads(recipients_data)
             
+        # PRE-FLIGHT RECIPIENT CHECKS
+        prospect = Prospect.objects.filter(id=prospect_id).first()
+        if not prospect:
+             return Response({'error': 'Prospect not found.'}, status=status.HTTP_400_BAD_REQUEST)
+             
         for rcpt in recipients_data:
-            rtype = rcpt.get('recipient_type', 'TO').upper()
             email = rcpt.get('email_address')
+            contact_id = rcpt.get('prospect_contact')
+            
+            # Check verification
+            verification = EmailVerification.objects.filter(prospect=prospect, email_address=email).order_by('-updated_at').first()
+            if not verification:
+                return Response({'error': f'Recipient {email} is unverified.'}, status=status.HTTP_400_BAD_REQUEST)
+            if verification.verification_status != 'VALID':
+                return Response({'error': f'Recipient {email} verification is {verification.verification_status}.'}, status=status.HTTP_400_BAD_REQUEST)
+            if not verification.confirmed_by_lq:
+                return Response({'error': f'Recipient {email} verification is valid but not confirmed by LQ.'}, status=status.HTTP_400_BAD_REQUEST)
+                
+            rtype = rcpt.get('recipient_type', 'TO').upper()
             if rtype == 'TO': to_emails.append(email)
             elif rtype == 'CC': cc_emails.append(email)
             elif rtype == 'BCC': bcc_emails.append(email)
@@ -336,11 +350,27 @@ class OutreachEmailViewSet(viewsets.ModelViewSet):
             server.login(mail_account.smtp_username, password)
             server.send_message(msg)
             server.quit()
+        except smtplib.SMTPRecipientsRefused as e:
+            # Permanent recipient failure
+            for rcpt_email, (code, msg) in e.recipients.items():
+                if code >= 500:
+                    verification = EmailVerification.objects.filter(prospect=prospect, email_address=rcpt_email).first()
+                    if verification:
+                        verification.verification_status = 'INVALID'
+                        verification.reason = f'Permanent SMTP failure: {code} {msg.decode("utf-8", errors="ignore")}'
+                        verification.save()
+                        
+                        # Trigger PRE Task
+                        lq = prospect.lead_qualification
+                        lq.pre_task_status = LeadQualification.PreTaskStatus.ISSUE_SENT_TO_PRE
+                        lq.issue_category = 'Email Verification'
+                        lq.issue_details = f"Email could not be delivered to {rcpt_email}. Verification updated to Invalid."
+                        lq.save()
+            return Response({'error': 'Email could not be delivered to one or more recipients. A verification task has been sent to PRE.'}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
             return Response({'error': f'SMTP Send failed. Please verify configuration.'}, status=status.HTTP_400_BAD_REQUEST)
             
         # Persistence
-        prospect = Prospect.objects.get(id=prospect_id)
         outreach_email = OutreachEmail.objects.create(
             prospect=prospect,
             created_by=user,

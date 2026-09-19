@@ -35,6 +35,7 @@ class MailAccount(models.Model):
     smtp_security = models.CharField(max_length=20, choices=(('TLS', 'TLS/STARTTLS'), ('SSL', 'SSL/TLS')), default='TLS')
     smtp_username = models.CharField(max_length=255)
     smtp_app_password_encrypted = models.TextField()
+    smtp_status = models.CharField(max_length=20, choices=(('CONFIGURED', 'Configured'), ('VERIFIED', 'Verified'), ('FAILED', 'Failed')), default='CONFIGURED')
     
     # IMAP Settings
     imap_host = models.CharField(max_length=255)
@@ -42,6 +43,7 @@ class MailAccount(models.Model):
     imap_security = models.CharField(max_length=20, choices=(('TLS', 'TLS/STARTTLS'), ('SSL', 'SSL/TLS')), default='SSL')
     imap_username = models.CharField(max_length=255)
     imap_app_password_encrypted = models.TextField()
+    imap_status = models.CharField(max_length=20, choices=(('CONFIGURED', 'Configured'), ('CONNECTED', 'Connected'), ('FAILED', 'Failed')), default='CONFIGURED')
     
     default_signature = models.TextField(blank=True, null=True)
     is_active = models.BooleanField(default=True)
