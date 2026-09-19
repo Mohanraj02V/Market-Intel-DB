@@ -4,6 +4,7 @@ import marketEventReducer from '../features/marketEvents/marketEventSlice';
 import prospectReducer from '../features/prospects/prospectSlice';
 import lqPipelineReducer from '../features/lqPipeline/lqPipelineSlice';
 import userReducer from '../features/users/userSlice';
+import outreachReducer from '../features/outreach/outreachSlice';
 
 export const store = configureStore({
   reducer: {
@@ -12,5 +13,6 @@ export const store = configureStore({
     marketEvents: marketEventReducer,
     lqPipeline: lqPipelineReducer,
     users: userReducer,
+    outreach: outreachReducer,
   },
 });

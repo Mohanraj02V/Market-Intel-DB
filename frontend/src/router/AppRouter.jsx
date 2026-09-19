@@ -1,4 +1,4 @@
-﻿import React, { useEffect } from 'react';
+import React, { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { useSelector, useDispatch } from 'react-redux';
 import { loginSuccess, logout } from '../features/auth/authSlice';
@@ -13,6 +13,7 @@ import KeyPeoplePage from '../pages/KeyPeoplePage';
 import KeyPersonDetailPage from '../pages/KeyPersonDetailPage';
 import UserManagementPage from '../pages/UserManagementPage';
 import PreTasksPage from '../pages/PreTasksPage';
+
 import Layout from '../components/layout/Layout';
 
 const RoleRoute = ({ children, allowedRoles, requireAdmin }) => {
@@ -78,6 +79,7 @@ const AppRouter = () => {
           <Route path="key-people/:id" element={<RoleRoute allowedRoles={['PRE']}><KeyPersonDetailPage /></RoleRoute>} />
           <Route path="users" element={<RoleRoute requireAdmin={true}><UserManagementPage /></RoleRoute>} />
           <Route path="lq-pipeline" element={<RoleRoute allowedRoles={['LQ']}><LqPipelinePage /></RoleRoute>} />
+
         </Route>
       </Routes>
     </Router>

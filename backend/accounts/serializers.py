@@ -1,4 +1,4 @@
-﻿from rest_framework import serializers
+from rest_framework import serializers
 from django.contrib.auth.models import User
 from .models import UserProfile
 
@@ -54,3 +54,42 @@ class UserSerializer(serializers.ModelSerializer):
             instance.profile.save()
             
         return instance
+
+from .models import MailAccount
+import utils.encryption as encryption
+
+class MailAccountSerializer(serializers.ModelSerializer):
+    smtp_app_password = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    imap_app_password = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    
+    class Meta:
+        model = MailAccount
+        fields = [
+            'id', 'name', 'email_address', 'display_name',
+            'smtp_host', 'smtp_port', 'smtp_security', 'smtp_username', 'smtp_app_password',
+            'imap_host', 'imap_port', 'imap_security', 'imap_username', 'imap_app_password',
+            'default_signature', 'is_active', 'last_imap_sync_at', 'last_sync_status', 'last_sync_error'
+        ]
+        read_only_fields = ['id', 'last_imap_sync_at', 'last_sync_status', 'last_sync_error']
+
+    def create(self, validated_data):
+        smtp_pw = validated_data.pop('smtp_app_password', None)
+        imap_pw = validated_data.pop('imap_app_password', None)
+        
+        if smtp_pw:
+            validated_data['smtp_app_password_encrypted'] = encryption.encrypt_password(smtp_pw)
+        if imap_pw:
+            validated_data['imap_app_password_encrypted'] = encryption.encrypt_password(imap_pw)
+            
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        smtp_pw = validated_data.pop('smtp_app_password', None)
+        imap_pw = validated_data.pop('imap_app_password', None)
+        
+        if smtp_pw:
+            validated_data['smtp_app_password_encrypted'] = encryption.encrypt_password(smtp_pw)
+        if imap_pw:
+            validated_data['imap_app_password_encrypted'] = encryption.encrypt_password(imap_pw)
+            
+        return super().update(instance, validated_data)

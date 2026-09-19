@@ -3,7 +3,7 @@ import { useDispatch, useSelector } from 'react-redux';
 import { 
   Building2, AlertTriangle, CheckCircle, Phone, Search, 
   CheckCircle2, AlertCircle, PlayCircle, RefreshCw,
-  FileEdit
+  FileEdit, Mail
 } from 'lucide-react';
 import { 
   fetchLqPipeline, 
@@ -11,6 +11,7 @@ import {
   reportIssueToPre, 
   confirmReverification 
 } from '../features/lqPipeline/lqPipelineSlice';
+import { Link } from 'react-router-dom';
 import LqWorkspaceModal from '../components/lq/LqWorkspaceModal';
 
 const LqPipelinePage = () => {
@@ -203,6 +204,7 @@ const LqPipelinePage = () => {
                 />
               </div>
             </div>
+
           </div>
         </div>
 

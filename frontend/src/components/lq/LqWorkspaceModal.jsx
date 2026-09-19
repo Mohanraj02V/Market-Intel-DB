@@ -14,6 +14,9 @@ import {
   X,
   Building2
 } from 'lucide-react';
+import { useDispatch, useSelector } from 'react-redux';
+import { fetchCommunications, sendOutreachEmail, recordCall, syncImap } from '../../features/outreach/outreachSlice';
+import { toast } from 'react-toastify';
 import api from '../../services/api';
 
 export default function LqWorkspaceModal({ 
@@ -28,29 +31,38 @@ export default function LqWorkspaceModal({
   handleReadyForOutreach
 }) {
   const [activeTab, setActiveTab] = useState(initialTab);
+  const dispatch = useDispatch();
   
   // Get safe prospect reference
   const prospect = selectedLq?.prospect || {};
   const isVerified = selectedLq?.verification_status === 'Verified';
-  const isProspectSelected = selectedLq?.qualification_status === 'Prospect Selected';
+  const isProspectSelected = selectedLq?.qualification_status === 'Lead Qualified';
 
   // --- OUTREACH  // Outreach State
   // Initialize from prop, but will be overridden by fresh fetch below
   const [emailProgress, setEmailProgress] = useState(selectedLq?.email_status || 'Not Sent');
   const [emailCollapsed, setEmailCollapsed] = useState(selectedLq?.email_status && selectedLq.email_status !== 'Not Sent');
-  const [selectedRecipients, setSelectedRecipients] = useState(prospect.official_email_address ? [prospect.official_email_address] : []);
+  const defaultToEmail = prospect?.key_contacts?.length > 0 && prospect.key_contacts[0].official_email ? prospect.key_contacts[0].official_email : '';
+  const [toEmails, setToEmails] = useState(defaultToEmail ? [defaultToEmail] : []);
+  const [ccEmails, setCcEmails] = useState([]);
   const [customRecipientInput, setCustomRecipientInput] = useState('');
   const [emailSubject, setEmailSubject] = useState(`Company Introduction & Solutions Overview — ${prospect.company_name || ''}`);
   const [emailBody, setEmailBody] = useState(`Dear ${prospect.company_name || 'Team'},\n\nWe are pleased to introduce our solution portfolio tailored for ${prospect.primary_industries || 'your industry'}. We would love to schedule a brief introductory discussion to explore potential alignment.\n\nBest regards,\nLead Qualification Team`);
+  const [attachments, setAttachments] = useState([]);
+  const [attachmentError, setAttachmentError] = useState('');
 
   // Call Outcome State
   const [callStatus, setCallStatus] = useState('Connected');
   const [ivrExtension, setIvrExtension] = useState('');
-  const [communicationOutcome, setCommunicationOutcome] = useState(selectedLq?.qualification_status === 'Prospect Selected' ? 'Prospect Selected' : '');
+  const [communicationOutcome, setCommunicationOutcome] = useState(selectedLq?.qualification_status === 'Lead Qualified' ? 'Lead Qualified' : '');
   const [callTranscriptNotes, setCallTranscriptNotes] = useState('');
   
+  // Key People selection for call
+  const [selectedContactId, setSelectedContactId] = useState('');
+  const [selectedContactData, setSelectedContactData] = useState(null);
+
   // Detailed Call Form Fields
-  const [requestedEmailConfirm, setRequestedEmailConfirm] = useState(prospect.official_email_address || '');
+  const [requestedEmailConfirm, setRequestedEmailConfirm] = useState(prospect?.official_email_address || '');
   const [callbackDate, setCallbackDate] = useState('');
   const [callbackTime, setCallbackTime] = useState('');
   const [callbackDescription, setCallbackDescription] = useState('');
@@ -83,6 +95,9 @@ export default function LqWorkspaceModal({
   }, [sharedContactEmail, sharedContactPhone, prospect]);
   const [notInterestedReason, setNotInterestedReason] = useState('');
   const [prospectSelectedDescription, setProspectSelectedDescription] = useState('');
+  const [meetingDate, setMeetingDate] = useState('');
+  const [meetingTime, setMeetingTime] = useState('');
+  const [meetingLink, setMeetingLink] = useState('');
 
   // Backend Outreach Logs State
   const [outreachLogs, setOutreachLogs] = useState([]);
@@ -105,56 +120,144 @@ export default function LqWorkspaceModal({
     }
   }, [selectedLq?.id]);
   
-  const fetchOutreachLogs = async () => {
+  const fetchOutreachLogs = async (contactId) => {
     try {
-      const res = await api.get(`/outreach-logs/?prospect=${prospect.id}`);
-      const logs = res.data.results || res.data;
+      const logs = await dispatch(fetchCommunications(prospect.id)).unwrap();
       setOutreachLogs(logs);
-      
-      const latestCall = logs.find(log => log.activity_type === 'Call');
+      const cid = contactId !== undefined ? contactId : selectedContactId;
+      const relevantLogs = cid
+        ? logs.filter(log => log.prospect_contact === cid && log.activity_type === 'CALL')
+        : logs.filter(log => !log.prospect_contact && log.activity_type === 'CALL');
+      const latestCall = relevantLogs[0];
       if (latestCall) {
-        setCommunicationOutcome(prev => prev || latestCall.outcome || '');
-        setCallStatus(prev => (prev === 'Connected' && latestCall.status && latestCall.status !== 'Connected') ? latestCall.status : prev);
+        setCallStatus(latestCall.status || 'Connected');
+        setCommunicationOutcome(latestCall.outcome || '');
       }
     } catch (err) {
       console.error("Failed to fetch outreach logs", err);
     }
   };
+
+  // Helpers for dropdown display
+  const getContactLatestCall = (contactId) => {
+    const relevantLogs = outreachLogs.filter(log => log.prospect_contact === contactId && log.activity_type === 'CALL');
+    const latest = relevantLogs[0];
+    if (latest) {
+      if (latest.outcome) return `${latest.status} (${latest.outcome})`;
+      return latest.status;
+    }
+    return null;
+  };
+
+  const getGeneralLatestCall = () => {
+    const relevantLogs = outreachLogs.filter(log => !log.prospect_contact && log.activity_type === 'CALL');
+    const latest = relevantLogs[0];
+    if (latest) {
+      if (latest.outcome) return `${latest.status} (${latest.outcome})`;
+      return latest.status;
+    }
+    return null;
+  };
+
+  // When selected contact changes, restore their call state from logs
+  useEffect(() => {
+    if (outreachLogs.length === 0) return;
+    const relevantLogs = selectedContactId
+      ? outreachLogs.filter(log => log.prospect_contact === selectedContactId && log.activity_type === 'CALL')
+      : outreachLogs.filter(log => !log.prospect_contact && log.activity_type === 'CALL');
+    const latestCall = relevantLogs[0];
+    if (latestCall) {
+      setCallStatus(latestCall.status || 'Connected');
+      setCommunicationOutcome(latestCall.outcome || '');
+    } else {
+      setCallStatus('Connected');
+      setCommunicationOutcome('');
+    }
+    setCallTranscriptNotes('');
+    setCallError('');
+  }, [selectedContactId]);
   const isEmailSent = ['Sent', 'Waiting for Response', 'Received Response'].includes(emailProgress);
 
-  const toggleRecipient = (email) => {
-    if (selectedRecipients.includes(email)) {
-      setSelectedRecipients(selectedRecipients.filter(e => e !== email));
-    } else {
-      setSelectedRecipients([...selectedRecipients, email]);
-    }
+  const toggleToRecipient = (email) => {
+    if (toEmails.includes(email)) setToEmails(toEmails.filter(e => e !== email));
+    else setToEmails([...toEmails, email]);
+  };
+  const toggleCcRecipient = (email) => {
+    if (ccEmails.includes(email)) setCcEmails(ccEmails.filter(e => e !== email));
+    else setCcEmails([...ccEmails, email]);
   };
 
   const handleAddCustomRecipient = (e) => {
     e.preventDefault();
-    if (customRecipientInput.trim() && !selectedRecipients.includes(customRecipientInput.trim())) {
-      setSelectedRecipients([...selectedRecipients, customRecipientInput.trim()]);
+    const em = customRecipientInput.trim();
+    if (em && !ccEmails.includes(em) && !toEmails.includes(em)) {
+      setCcEmails([...ccEmails, em]);
       setCustomRecipientInput('');
     }
   };
 
+  const handleFileChange = (e) => {
+    const files = Array.from(e.target.files);
+    setAttachmentError('');
+    let validFiles = [];
+    let currentTotalSize = attachments.reduce((acc, file) => acc + file.size, 0);
+    
+    for (const file of files) {
+      if (file.size > 10 * 1024 * 1024) {
+        setAttachmentError(`File ${file.name} exceeds the 10MB limit.`);
+        return;
+      }
+      const ext = file.name.split('.').pop().toLowerCase();
+      const blockedExts = ['exe', 'bat', 'cmd', 'js', 'ps1', 'vbs', 'scr'];
+      if (blockedExts.includes(ext)) {
+        setAttachmentError(`File type .${ext} is not allowed for email attachments.`);
+        return;
+      }
+      if (currentTotalSize + file.size > 25 * 1024 * 1024) {
+        setAttachmentError(`Adding ${file.name} exceeds the total 25MB attachment limit.`);
+        return;
+      }
+      currentTotalSize += file.size;
+      validFiles.push(file);
+    }
+    setAttachments(prev => [...prev, ...validFiles]);
+    e.target.value = '';
+  };
+
+  const removeAttachment = (index) => {
+    setAttachments(prev => prev.filter((_, i) => i !== index));
+    setAttachmentError('');
+  };
+
   const handleSendIntroEmail = async (e) => {
     e.preventDefault();
-    if (selectedRecipients.length === 0) return;
+    if (toEmails.length === 0 && ccEmails.length === 0) return;
     setEmailProgress('Sent');
     setEmailCollapsed(true);
     
     try {
       await api.patch(`/lq-pipeline/${selectedLq.id}/`, { email_status: 'Sent' });
-      await api.post('/outreach-logs/', {
-        prospect: prospect.id,
-        activity_type: 'Email',
-        status: 'Sent',
-        notes: `Intro Email sent to [${selectedRecipients.join(', ')}]. Subject: ${emailSubject}`
+      const formData = new FormData();
+      formData.append('prospect', prospect.id);
+      formData.append('subject', emailSubject);
+      formData.append('body', emailBody);
+      
+      const recList = [
+        ...toEmails.map(r => ({ email_address: r, recipient_type: 'TO' })),
+        ...ccEmails.map(r => ({ email_address: r, recipient_type: 'CC' }))
+      ];
+      formData.append('recipients', JSON.stringify(recList));
+
+      attachments.forEach(file => {
+        formData.append('attachments', file);
       });
+      
+      await dispatch(sendOutreachEmail(formData)).unwrap();
       fetchOutreachLogs();
+      toast.success("Email sent successfully!");
     } catch (err) {
       console.error("Failed to log email", err);
+      toast.error("Failed to send email.");
     }
   };
 
@@ -166,12 +269,8 @@ export default function LqWorkspaceModal({
     
     try {
       await api.patch(`/lq-pipeline/${selectedLq.id}/`, { email_status: status });
-      await api.post('/outreach-logs/', {
-        prospect: prospect.id,
-        activity_type: 'Email',
-        status: status,
-        notes: `Email Progress updated to: ${status}`
-      });
+      // Depending on requirements, we can also manually create a CommunicationActivity here, 
+      // but usually the email progress is sufficient unless a response is received.
       fetchOutreachLogs();
     } catch (err) {
       console.error("Failed to update email status", err);
@@ -204,10 +303,14 @@ export default function LqWorkspaceModal({
         return;
       }
     }
-    // 3c. Prospect Selected — description is MANDATORY
-    if (callStatus === 'Connected' && communicationOutcome === 'Prospect Selected') {
+        // 3c. Lead Qualified
+    if (callStatus === 'Connected' && communicationOutcome === 'Lead Qualified') {
+      if (!meetingDate || !meetingTime) {
+        setCallError('Meeting Date and Time are required.');
+        return;
+      }
       if (!prospectSelectedDescription.trim()) {
-        setCallError('Description is required for "Prospect Selected".');
+        setCallError('Meeting Agenda is required.');
         return;
       }
     }
@@ -237,7 +340,11 @@ export default function LqWorkspaceModal({
       else if (communicationOutcome === 'Call Transferred') detailsParts.push(`Outcome: Transferred to ${transferredPersonName} (${transferredDesignation})`);
       else if (communicationOutcome === 'Shared Another Contact') detailsParts.push(`Outcome: Shared Contact ${sharedContactName} - ${sharedContactDesignation} (Ph: ${sharedContactPhone || 'N/A'}, Email: ${sharedContactEmail || 'N/A'})`);
       else if (communicationOutcome === 'Not Interested') detailsParts.push(`Outcome: Not Interested (Reason: ${notInterestedReason})`);
-      else if (communicationOutcome === 'Prospect Selected') detailsParts.push(`Outcome: Prospect Selected (Notes: ${prospectSelectedDescription})`);
+      else if (communicationOutcome === 'Lead Qualified') {
+        detailsParts.push(`Outcome: Lead Qualified (Meeting Scheduled: ${meetingDate} at ${meetingTime})`);
+        if (meetingLink) detailsParts.push(`Link: ${meetingLink}`);
+        detailsParts.push(`Agenda: ${prospectSelectedDescription}`);
+      }
     }
     
     if (callTranscriptNotes.trim()) detailsParts.push(`Notes: ${callTranscriptNotes.trim()}`);
@@ -245,13 +352,34 @@ export default function LqWorkspaceModal({
     let callOutcome = communicationOutcome || '';
     
     try {
-      await api.post('/outreach-logs/', {
+      const callPhone = selectedContactId
+        ? (prospect?.key_contacts?.find(c => c.id === selectedContactId)?.phone_number || prospect.official_phone_number || '')
+        : (prospect.official_phone_number || '');
+      await dispatch(recordCall({
         prospect: prospect.id,
-        activity_type: 'Call',
-        status: callStatus,
-        outcome: callOutcome,
+        prospect_contact: selectedContactId || null,
+        call_status: callStatus,
+        communication_outcome: communicationOutcome || '',
+        company_phone: callPhone,
+        ivr_extension: ivrExtension,
         notes: detailsParts.join(' | ')
-      });
+      })).unwrap();
+      
+      // If Invalid Number, report issue to PRE and close
+      if (callStatus === 'Invalid Number') {
+        try {
+          await api.post(`/lq-pipeline/${selectedLq.id}/report-issue/`, {
+            issue_category: 'Invalid Phone Number',
+            issue_details: `The phone number is invalid. Please find the correct contact number.`
+          });
+          toast.info("Issue reported to PRE: Invalid Number");
+          onClose(); // close the modal
+          return;
+        } catch (err) {
+          console.error("Failed to report invalid number issue", err);
+        }
+      }
+
       fetchOutreachLogs();
     } catch (err) {
       console.error("Failed to log call outcome", err);
@@ -263,21 +391,17 @@ export default function LqWorkspaceModal({
     setCommunicationOutcome('');
     setCallError('');
 
-    // If Call Back Later, save reminder to backend
-    if (callStatus === 'Connected' && communicationOutcome === 'Call Back Later' && callbackDate && callbackTime) {
-      try {
-        const datetimeString = `${callbackDate}T${callbackTime}:00`;
-        api.post('/reminders/', {
-          prospect: prospect.id,
-          scheduled_datetime: datetimeString,
-          description: callbackDescription || 'Call Back Later'
-        });
-        // Reset callback form
-        setCallbackDate('');
-        setCallbackTime('');
-        setCallbackDescription('');
-      } catch (error) {
-        console.error("Failed to schedule callback reminder", error);
+    // Reminders
+    if (callStatus === 'Connected' && ['Call Back Later', 'Lead Qualified'].includes(communicationOutcome)) {
+      const dVal = communicationOutcome === 'Lead Qualified' ? meetingDate : callbackDate;
+      const tVal = communicationOutcome === 'Lead Qualified' ? meetingTime : callbackTime;
+      const descVal = communicationOutcome === 'Lead Qualified' ? `Meeting\nLink: ${meetingLink}\nAgenda: ${prospectSelectedDescription}` : (callbackDescription || 'Call Back Later');
+      if (dVal && tVal) {
+        try {
+          api.post('/reminders/', { prospect: prospect.id, scheduled_datetime: `${dVal}T${tVal}:00`, description: descVal });
+          if (communicationOutcome === 'Call Back Later') { setCallbackDate(''); setCallbackTime(''); setCallbackDescription(''); }
+          else { setMeetingDate(''); setMeetingTime(''); setMeetingLink(''); setProspectSelectedDescription(''); }
+        } catch (e) {}
       }
     }
 
@@ -317,8 +441,8 @@ export default function LqWorkspaceModal({
       return;
     }
 
-    // Prospect Selected → set qualification_status to 'Prospect Selected' + close
-    if (callStatus === 'Connected' && communicationOutcome === 'Prospect Selected') {
+    // Prospect Selected → set qualification_status to 'Lead Qualified' + close
+    if (callStatus === 'Connected' && communicationOutcome === 'Lead Qualified') {
       try {
         await api.patch(`/lq-pipeline/${selectedLq.id}/`, { qualification_status: 'Prospect Selected' });
       } catch (err) {
@@ -337,7 +461,7 @@ export default function LqWorkspaceModal({
       case 'address': return prospect.complete_address || '-';
       case 'website': return prospect.official_website_url || '-';
       case 'linkedIn': return prospect.linkedin_company_page || '-';
-      case 'email': return prospect.official_email_address || '-';
+      case 'email': return prospect?.official_email_address || '-';
       case 'contactNo': return prospect.official_phone_number || '-';
       case 'productService': return prospect.primary_offering_type || '-';
       default: return '-';
@@ -564,6 +688,29 @@ export default function LqWorkspaceModal({
                             <button key={st} onClick={() => handleUpdateEmailProgressStatus(st)} className={`px-2.5 py-1 rounded-lg font-bold transition ${emailProgress === st ? 'bg-indigo-600 text-white' : 'text-slate-300 hover:text-white hover:bg-slate-700/60'}`}>{st}</button>
                           ))}
                         </div>
+                        {emailProgress === 'Waiting for Response' && (
+                          <button
+                            type="button"
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              const toastId = toast.loading('Checking for replies...');
+                              try {
+                                await dispatch(syncImap()).unwrap();
+                                setTimeout(async () => {
+                                  await fetchOutreachLogs();
+                                  toast.dismiss(toastId);
+                                  toast.success('Inbox synced!');
+                                }, 2500);
+                              } catch (err) {
+                                toast.dismiss(toastId);
+                                toast.error('Sync failed.');
+                              }
+                            }}
+                            className="px-2.5 py-1 bg-sky-600 hover:bg-sky-500 text-white font-extrabold text-[10px] rounded-xl uppercase tracking-wider transition border border-sky-400/40"
+                          >
+                            ↻ Sync
+                          </button>
+                        )}
                         <button onClick={() => setEmailCollapsed(!emailCollapsed)} className="px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white font-extrabold text-xs rounded-xl transition flex items-center gap-1.5 border border-white/10">
                           {emailCollapsed ? <><span className="hidden sm:inline">Expand Draft</span><ChevronDown className="w-3.5 h-3.5" /></> : <><span className="hidden sm:inline">Collapse</span><ChevronUp className="w-3.5 h-3.5" /></>}
                         </button>
@@ -574,23 +721,35 @@ export default function LqWorkspaceModal({
                         <div className="space-y-2">
                           <label className="block font-extrabold text-slate-800 uppercase tracking-wider text-[10px]">Select Introduction Email Recipients</label>
                           <div className="grid grid-cols-1 gap-2">
-                            {prospect.official_email_address && (
-                              <label className={`flex items-center gap-2.5 p-2.5 rounded-xl border transition cursor-pointer ${selectedRecipients.includes(prospect.official_email_address) ? 'bg-indigo-50 border-indigo-300 text-indigo-950 font-bold' : 'bg-white border-slate-200 text-slate-700'}`}>
-                                <input type="checkbox" checked={selectedRecipients.includes(prospect.official_email_address)} onChange={() => toggleRecipient(prospect.official_email_address)} className="accent-indigo-600" />
+                            {prospect?.key_contacts?.map(contact => contact.official_email && (
+                              <label key={contact.id} className={`flex items-center gap-2.5 p-2.5 rounded-xl border transition cursor-pointer ${toEmails.includes(contact.official_email) ? 'bg-indigo-50 border-indigo-300 text-indigo-950 font-bold' : 'bg-white border-slate-200 text-slate-700'}`}>
+                                <input type="checkbox" checked={toEmails.includes(contact.official_email)} onChange={() => toggleToRecipient(contact.official_email)} className="accent-indigo-600" />
+                                <div className="overflow-hidden">
+                                  <span className="block truncate text-sm">{contact.official_email}</span>
+                                  <span className="text-[10px] text-slate-400 font-semibold">{contact.contact_name} ({contact.designation}) - TO</span>
+                                </div>
+                              </label>
+                            ))}
+                            
+                            {prospect?.official_email_address && (
+                              <label className={`flex items-center gap-2.5 p-2.5 rounded-xl border transition cursor-pointer ${ccEmails.includes(prospect.official_email_address) ? 'bg-indigo-50 border-indigo-300 text-indigo-950 font-bold' : 'bg-white border-slate-200 text-slate-700'}`}>
+                                <input type="checkbox" checked={ccEmails.includes(prospect.official_email_address)} onChange={() => toggleCcRecipient(prospect.official_email_address)} className="accent-indigo-600" />
                                 <div className="overflow-hidden">
                                   <span className="block truncate text-sm">{prospect.official_email_address}</span>
-                                  <span className="text-[10px] text-slate-400 font-semibold">Official Company Email</span>
+                                  <span className="text-[10px] text-slate-400 font-semibold">Reception / Official Email - CC</span>
                                 </div>
                               </label>
                             )}
-                            {!prospect.official_email_address && (
+                            
+                            {(!prospect?.official_email_address && (!prospect?.key_contacts || prospect.key_contacts.length === 0)) && (
                               <div className="p-2.5 rounded-xl border border-amber-200 bg-amber-50 text-amber-700 text-xs font-semibold">
-                                No official company email found for this prospect. Please update the prospect details.
+                                No official company email or key contacts found for this prospect. Please update the prospect details.
                               </div>
                             )}
-                            {selectedRecipients.filter(email => email !== prospect.official_email_address).map((email) => (
+
+                            {ccEmails.filter(email => email !== prospect?.official_email_address).map((email) => (
                               <label key={email} className="flex items-center gap-2.5 p-2.5 rounded-xl border transition cursor-pointer bg-slate-50 border-indigo-200 text-slate-800 font-bold">
-                                <input type="checkbox" checked={true} onChange={() => toggleRecipient(email)} className="accent-indigo-600" />
+                                <input type="checkbox" checked={true} onChange={() => toggleCcRecipient(email)} className="accent-indigo-600" />
                                 <div className="overflow-hidden">
                                   <span className="block truncate text-sm">{email}</span>
                                   <span className="text-[10px] text-indigo-500 font-extrabold uppercase">CC</span>
@@ -611,11 +770,37 @@ export default function LqWorkspaceModal({
                           <label className="block font-extrabold text-slate-800 mb-1 uppercase tracking-wider text-[10px]">Email Message Content</label>
                           <textarea rows={4} value={emailBody} onChange={(e) => setEmailBody(e.target.value)} className="w-full p-3 bg-white border border-slate-200 rounded-xl text-xs font-medium text-slate-800 leading-relaxed focus:outline-none focus:ring-2 focus:ring-indigo-500/20" />
                         </div>
+                        <div>
+                          <label className="block font-extrabold text-slate-800 mb-1 uppercase tracking-wider text-[10px]">Attachments</label>
+                          <div className="p-3 bg-white border border-slate-200 rounded-xl space-y-2">
+                            <input 
+                              type="file" 
+                              multiple 
+                              onChange={handleFileChange} 
+                              className="text-xs text-slate-700 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer"
+                            />
+                            {attachmentError && (
+                              <div className="text-red-600 text-[10px] font-bold">{attachmentError}</div>
+                            )}
+                            {attachments.length > 0 && (
+                              <div className="flex flex-wrap gap-2 mt-2">
+                                {attachments.map((file, i) => (
+                                  <div key={i} className="flex items-center gap-1.5 px-2 py-1 bg-slate-100 rounded-md border border-slate-200 text-[10px] font-semibold text-slate-700">
+                                    <span className="truncate max-w-[120px]">{file.name}</span>
+                                    <span className="text-slate-400">({(file.size / 1024 / 1024).toFixed(1)}MB)</span>
+                                    <button type="button" onClick={() => removeAttachment(i)} className="text-red-500 hover:text-red-700 font-bold ml-1">×</button>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            <p className="text-[9px] text-slate-400 font-medium">Max 10MB per file, 25MB total. Executables not allowed.</p>
+                          </div>
+                        </div>
                         <div className="flex items-center justify-between border-t border-slate-200 pt-3">
                           <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-600">
-                            <span>Selected Recipients:</span><span className="px-2 py-0.5 rounded bg-indigo-100 text-indigo-800 font-extrabold">{selectedRecipients.length} Address(es)</span>
+                            <span>Selected Recipients:</span><span className="px-2 py-0.5 rounded bg-indigo-100 text-indigo-800 font-extrabold">{toEmails.length + ccEmails.length} Address(es)</span>
                           </div>
-                          <button type="button" onClick={handleSendIntroEmail} disabled={selectedRecipients.length === 0 || isEmailSent} className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-black rounded-xl text-xs transition cursor-pointer shadow-sm flex items-center gap-2">
+                          <button type="button" onClick={handleSendIntroEmail} disabled={(toEmails.length === 0 && ccEmails.length === 0) || isEmailSent} className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-black rounded-xl text-xs transition cursor-pointer shadow-sm flex items-center gap-2">
                             <Mail className="w-4 h-4" /> <span>Send Introduction Email & Mark Sent</span>
                           </button>
                         </div>
@@ -655,21 +840,97 @@ export default function LqWorkspaceModal({
                       </div>
                     ) : (
                       <form onSubmit={handleLogCallOutcome} className="p-5 space-y-5 text-xs">
-                        <div className="p-3.5 bg-emerald-50/60 border border-emerald-200/80 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-                          <div>
-                            <span className="font-extrabold text-emerald-950 text-xs flex items-center gap-1.5"><Phone className="w-4 h-4 text-emerald-700" /> Official Company Number: {prospect.official_phone_number || 'No phone'}</span>
-                            <p className="text-[11px] text-emerald-800 mt-0.5">Call the company official number to reach decision makers.</p>
+                        {/* Key People Dropdown + Phone Display */}
+                        <div className="p-3.5 bg-emerald-50/60 border border-emerald-200/80 rounded-xl space-y-3">
+                          <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
+                            <div className="flex-1">
+                              <label className="block font-extrabold text-emerald-950 text-[10px] uppercase tracking-wider mb-1.5">Select Key Person to Call</label>
+                              <select
+                                value={selectedContactId}
+                                onChange={(e) => {
+                                  const id = e.target.value;
+                                  setSelectedContactId(id);
+                                  const contact = prospect?.key_contacts?.find(c => c.id === id);
+                                  setSelectedContactData(contact || null);
+                                  setCallStatus('Connected');
+                                  setCommunicationOutcome('');
+                                  setCallTranscriptNotes('');
+                                  // Load existing logs for this contact
+                                  const relevantLogs = id
+                                    ? outreachLogs.filter(log => log.prospect_contact === id && log.activity_type === 'CALL')
+                                    : outreachLogs.filter(log => !log.prospect_contact && log.activity_type === 'CALL');
+                                  const latestCall = relevantLogs[0];
+                                  if (latestCall) {
+                                    setCallStatus(latestCall.status || 'Connected');
+                                    setCommunicationOutcome(latestCall.outcome || '');
+                                  }
+                                }}
+                                className="w-full p-2.5 bg-white border border-emerald-300 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                              >
+                                <option value="">
+                                  Company Official Number (General) {getGeneralLatestCall() ? ` - ${getGeneralLatestCall()}` : ''}
+                                </option>
+                                {prospect?.key_contacts?.map(contact => {
+                                  const callStatusStr = getContactLatestCall(contact.id);
+                                  return (
+                                    <option key={contact.id} value={contact.id}>
+                                      {contact.contact_name}{contact.designation ? ` - ${contact.designation}` : ''}
+                                      {callStatusStr ? ` - ${callStatusStr}` : ''}
+                                    </option>
+                                  );
+                                })}
+                              </select>
+                            </div>
+                            <div className="flex items-center gap-2 w-full sm:w-auto shrink-0">
+                              <label className="text-xs font-bold text-slate-700 whitespace-nowrap">IVR Ext:</label>
+                              <input type="text" value={ivrExtension} onChange={(e) => setIvrExtension(e.target.value)} placeholder="e.g. Ext. 104" className="p-2 bg-white border border-emerald-300 rounded-xl text-xs font-extrabold text-slate-900 w-28 focus:outline-none focus:ring-2 focus:ring-emerald-500/20" />
+                            </div>
                           </div>
-                          <div className="flex items-center gap-2 w-full sm:w-auto">
-                            <label className="text-xs font-bold text-slate-700 whitespace-nowrap">IVR Ext:</label>
-                            <input type="text" value={ivrExtension} onChange={(e) => setIvrExtension(e.target.value)} placeholder="e.g. Ext. 104" className="p-2 bg-white border border-emerald-300 rounded-xl text-xs font-extrabold text-slate-900 w-28 focus:outline-none focus:ring-2 focus:ring-emerald-500/20" />
+                          <div className="flex items-center gap-2 pt-1 border-t border-emerald-200/60">
+                            <Phone className="w-4 h-4 text-emerald-700 shrink-0" />
+                            {selectedContactId && selectedContactData ? (
+                              <div className="flex items-center gap-2">
+                                <span className="font-extrabold text-emerald-950 text-xs">
+                                  {selectedContactData.contact_name}: {selectedContactData.phone_number || 'No phone on record'}
+                                </span>
+                                {selectedContactData.phone_number && (
+                                  <a href={`tel:${selectedContactData.phone_number}`} className="px-2 py-0.5 bg-emerald-500 hover:bg-emerald-600 text-white font-black text-[10px] rounded-lg transition">
+                                    Call Now
+                                  </a>
+                                )}
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-2">
+                                <span className="font-extrabold text-emerald-950 text-xs">
+                                  Official Company Number: {prospect.official_phone_number || 'No phone'}
+                                </span>
+                                {prospect.official_phone_number && (
+                                  <a href={`tel:${prospect.official_phone_number}`} className="px-2 py-0.5 bg-emerald-500 hover:bg-emerald-600 text-white font-black text-[10px] rounded-lg transition">
+                                    Call Now
+                                  </a>
+                                )}
+                              </div>
+                            )}
                           </div>
                         </div>
                         <div>
                           <label className="block font-extrabold text-slate-800 mb-2 uppercase tracking-wider text-[10px]">1. Record Call Status Outcome</label>
                           <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-                            {['Connected', 'No Answer', 'Busy', 'Switched Off', 'Invalid Number'].map(st => (
-                              <button key={st} type="button" onClick={() => setCallStatus(st)} className={`p-2.5 rounded-xl border text-center font-bold text-xs transition ${callStatus === st ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm' : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'}`}>{st}</button>
+                            {[
+                              { label: 'Connected',      active: 'bg-emerald-600 text-white border-emerald-600 shadow-md ring-2 ring-emerald-300', idle: 'bg-emerald-50 text-emerald-700 border-emerald-300 hover:bg-emerald-100' },
+                              { label: 'No Answer',      active: 'bg-amber-500 text-white border-amber-500 shadow-md ring-2 ring-amber-300',   idle: 'bg-amber-50 text-amber-700 border-amber-300 hover:bg-amber-100' },
+                              { label: 'Busy',           active: 'bg-orange-500 text-white border-orange-500 shadow-md ring-2 ring-orange-300', idle: 'bg-orange-50 text-orange-700 border-orange-300 hover:bg-orange-100' },
+                              { label: 'Switched Off',   active: 'bg-rose-600 text-white border-rose-600 shadow-md ring-2 ring-rose-300',       idle: 'bg-rose-50 text-rose-700 border-rose-300 hover:bg-rose-100' },
+                              { label: 'Invalid Number', active: 'bg-slate-700 text-white border-slate-700 shadow-md ring-2 ring-slate-400',    idle: 'bg-slate-100 text-slate-600 border-slate-300 hover:bg-slate-200' },
+                            ].map(({ label, active, idle }) => (
+                              <button
+                                key={label}
+                                type="button"
+                                onClick={() => setCallStatus(label)}
+                                className={`p-2.5 rounded-xl border text-center font-extrabold text-xs transition-all ${callStatus === label ? active : idle}`}
+                              >
+                                {label}
+                              </button>
                             ))}
                           </div>
                         </div>
@@ -678,11 +939,11 @@ export default function LqWorkspaceModal({
                             <div>
                               <label className="block font-extrabold text-slate-900 mb-1.5 uppercase tracking-wider text-[10px] flex items-center gap-1.5"><TrendingUp className="w-3.5 h-3.5 text-emerald-600" /><span>2. Record Communication Progress Outcome</span></label>
                               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                                {['Requested Email', 'Call Back Later', 'Call Transferred', 'Shared Another Contact', 'Not Interested', 'Prospect Selected'].map(out => (
+                                {['Requested Email', 'Call Back Later', 'Call Transferred', 'Shared Another Contact', 'Not Interested', 'Lead Qualified'].map(out => (
                                   <button key={out} type="button" onClick={() => setCommunicationOutcome(out)} className={`p-2.5 rounded-xl border text-left font-extrabold text-xs transition flex items-center justify-between ${
                                     communicationOutcome === out ?
                                       out === 'Not Interested' ? 'bg-rose-50 border-rose-500 text-rose-950 shadow-sm' :
-                                      out === 'Prospect Selected' ? 'bg-emerald-50 border-emerald-500 text-emerald-950 shadow-sm' :
+                                      out === 'Lead Qualified' ? 'bg-emerald-50 border-emerald-500 text-emerald-950 shadow-sm' :
                                       'bg-emerald-50 border-emerald-500 text-emerald-950 shadow-sm'
                                     : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
                                   }`}>
@@ -771,24 +1032,33 @@ export default function LqWorkspaceModal({
                                 <p className="text-[10px] text-rose-700 font-semibold">⚠️ Prospect Status will be set to <strong>Budget Frozen</strong>. The Outreach button will be disabled.</p>
                               </div>
                             )}
-                            {communicationOutcome === 'Prospect Selected' && (
-                              <div className="p-3.5 bg-emerald-50 border border-emerald-300 rounded-xl space-y-2">
-                                <span className="font-extrabold text-emerald-950 text-xs block">✅ Prospect Selected for Engagement</span>
-                                <label className="block text-[11px] font-bold text-slate-700">Description / Notes <span className="text-red-500">*</span></label>
-                                <textarea
-                                  rows={3}
-                                  value={prospectSelectedDescription}
-                                  onChange={(e) => setProspectSelectedDescription(e.target.value)}
-                                  placeholder="Describe why this prospect was selected, next steps, etc..."
-                                  className={`w-full p-2 bg-white border rounded-xl text-xs font-semibold resize-none ${prospectSelectedDescription.trim() ? 'border-emerald-300' : 'border-red-400 ring-1 ring-red-300'}`}
-                                />
-                                <p className="text-[10px] text-emerald-700 font-semibold">✅ Prospect Status will be set to <strong>Prospect Selected</strong>.</p>
+                            {communicationOutcome === 'Lead Qualified' && (
+                              <div className="p-3.5 bg-emerald-50 border border-emerald-300 rounded-xl space-y-3">
+                                <span className="font-extrabold text-emerald-950 block text-xs">✅ Lead Qualified & Schedule Meeting</span>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                  <div>
+                                    <label className="block text-[11px] font-bold text-slate-700 mb-1">Meeting Date *</label>
+                                    <input type="date" required value={meetingDate} onChange={(e) => setMeetingDate(e.target.value)} className="w-full p-2 bg-white border border-emerald-300 rounded-xl text-xs" />
+                                  </div>
+                                  <div>
+                                    <label className="block text-[11px] font-bold text-slate-700 mb-1">Meeting Time *</label>
+                                    <input type="time" required value={meetingTime} onChange={(e) => setMeetingTime(e.target.value)} className="w-full p-2 bg-white border border-emerald-300 rounded-xl text-xs" />
+                                  </div>
+                                </div>
+                                <div>
+                                  <label className="block text-[11px] font-bold text-slate-700 mb-1">Meeting Link</label>
+                                  <input type="text" value={meetingLink} onChange={(e) => setMeetingLink(e.target.value)} className="w-full p-2 bg-white border border-emerald-300 rounded-xl text-xs" />
+                                </div>
+                                <div>
+                                  <label className="block text-[11px] font-bold text-slate-700 mb-1">Agenda *</label>
+                                  <textarea rows={2} value={prospectSelectedDescription} onChange={(e) => setProspectSelectedDescription(e.target.value)} className={`w-full p-2 bg-white border rounded-xl text-xs resize-none ${prospectSelectedDescription.trim() ? 'border-emerald-300' : 'border-red-400'}`} />
+                                </div>
                               </div>
                             )}
                           </div>
                         )}
                         {/* Hide transcript when a structured outcome form is already capturing detail */}
-                        {!['Requested Email', 'Call Back Later', 'Call Transferred', 'Shared Another Contact', 'Not Interested', 'Prospect Selected'].includes(communicationOutcome) && (
+                        {!['Requested Email', 'Call Back Later', 'Call Transferred', 'Shared Another Contact', 'Not Interested', 'Lead Qualified'].includes(communicationOutcome) && (
                           <div>
                             <label className="block font-bold text-slate-800 mb-1">Call Transcript &amp; Discussion Summary</label>
                             <textarea rows={3} value={callTranscriptNotes} onChange={(e) => setCallTranscriptNotes(e.target.value)} placeholder="Enter notes from call conversation..." className="w-full p-2.5 bg-white border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500/20 font-medium" />
@@ -823,8 +1093,8 @@ export default function LqWorkspaceModal({
                           <div key={log.id} className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-xs space-y-1.5">
                             <div className="flex items-center justify-between">
                               <div className="flex items-center gap-2 flex-wrap">
-                                <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${log.activity_type === 'Call' ? 'bg-emerald-100 text-emerald-900' : 'bg-indigo-100 text-indigo-900'}`}>{log.activity_type}</span>
-                                {log.status && <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${log.activity_type === 'Call' ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-indigo-50 text-indigo-800 border-indigo-200'}`}>{log.activity_type}: {log.status}</span>}
+                                <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${log.activity_type === 'CALL_MADE' ? 'bg-emerald-100 text-emerald-900' : 'bg-indigo-100 text-indigo-900'}`}>{log.activity_type}</span>
+                                {log.status && <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${log.activity_type === 'CALL_MADE' ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-indigo-50 text-indigo-800 border-indigo-200'}`}>{log.activity_type}: {log.status}</span>}
                                 {log.outcome && <span className="px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-bold">Outcome: {log.outcome}</span>}
                               </div>
                               <span className="text-[10px] text-slate-400 font-semibold flex items-center gap-1">

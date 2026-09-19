@@ -1,10 +1,11 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
-from .views import UserMeView, UserViewSet
+from .views import UserMeView, UserViewSet, MailAccountViewSet
 
 router = DefaultRouter()
 router.register(r'users', UserViewSet, basename='user')
+router.register(r'mail-account', MailAccountViewSet, basename='mail-account')
 
 
 urlpatterns = [

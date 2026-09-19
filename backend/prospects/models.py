@@ -171,14 +171,61 @@ class CallbackReminder(models.Model):
     def __str__(self):
         return f"Reminder for {self.prospect.company_name} at {self.scheduled_datetime}"
 
-class OutreachLog(models.Model):
-    prospect = models.ForeignKey(Prospect, on_delete=models.CASCADE, related_name='outreach_logs')
-    activity_type = models.CharField(max_length=50) # 'Call', 'Email'
+class OutreachEmail(models.Model):
+    prospect = models.ForeignKey(Prospect, on_delete=models.CASCADE, related_name='outreach_emails')
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True)
+    sender_mail_account = models.ForeignKey('accounts.MailAccount', on_delete=models.SET_NULL, null=True, blank=True)
+    from_email = models.CharField(max_length=255)
+    from_name = models.CharField(max_length=255, blank=True, null=True)
+    subject = models.CharField(max_length=512)
+    body = models.TextField()
+    signature = models.TextField(blank=True, null=True)
+    status = models.CharField(max_length=50, choices=(('NOT SENT', 'Not Sent'), ('SENT', 'Sent'), ('WAITING FOR RESPONSE', 'Waiting for Response'), ('RECEIVED RESPONSE', 'Received Response'), ('FAILED', 'Failed')), default='NOT SENT')
+    sent_at = models.DateTimeField(null=True, blank=True)
+    message_id = models.CharField(max_length=255, blank=True, null=True)
+    thread_id = models.CharField(max_length=255, blank=True, null=True)
+    in_reply_to = models.CharField(max_length=255, blank=True, null=True)
+    references = models.TextField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+class OutreachEmailRecipient(models.Model):
+    outreach_email = models.ForeignKey(OutreachEmail, on_delete=models.CASCADE, related_name='recipients')
+    email_address = models.EmailField()
+    prospect_contact = models.ForeignKey(ProspectContact, on_delete=models.SET_NULL, null=True, blank=True)
+    recipient_type = models.CharField(max_length=10, choices=(('TO', 'TO'), ('CC', 'CC'), ('BCC', 'BCC')))
+
+class EmailAttachment(models.Model):
+    outreach_email = models.ForeignKey(OutreachEmail, on_delete=models.CASCADE, related_name='attachments')
+    file = models.FileField(upload_to='attachments/%Y/%m/%d/')
+    original_filename = models.CharField(max_length=255)
+    mime_type = models.CharField(max_length=255)
+    size = models.BigIntegerField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+class CallActivity(models.Model):
+    prospect = models.ForeignKey(Prospect, on_delete=models.CASCADE, related_name='call_activities')
+    prospect_contact = models.ForeignKey(ProspectContact, on_delete=models.SET_NULL, null=True, blank=True, related_name='call_activities')
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True)
+    company_phone = models.CharField(max_length=255, blank=True, null=True)
+    ivr_extension = models.CharField(max_length=50, blank=True, null=True)
+    call_status = models.CharField(max_length=100)
+    communication_outcome = models.CharField(max_length=255, blank=True, null=True)
+    notes = models.TextField(blank=True, null=True)
+    call_started_at = models.DateTimeField(null=True, blank=True)
+    call_ended_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+class CommunicationActivity(models.Model):
+    prospect = models.ForeignKey(Prospect, on_delete=models.CASCADE, related_name='communication_timeline')
+    prospect_contact = models.ForeignKey(ProspectContact, on_delete=models.SET_NULL, null=True, blank=True, related_name='communication_timeline')
+    activity_type = models.CharField(max_length=50, choices=(('EMAIL_SENT', 'Email Sent'), ('EMAIL_RECEIVED', 'Email Received'), ('CALL', 'Call')))
+    direction = models.CharField(max_length=20, choices=(('OUTBOUND', 'Outbound'), ('INBOUND', 'Inbound')), default='OUTBOUND')
     status = models.CharField(max_length=255, blank=True, null=True)
     outcome = models.CharField(max_length=255, blank=True, null=True)
+    subject = models.CharField(max_length=512, blank=True, null=True)
     notes = models.TextField(blank=True, null=True)
-    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True)
+    outreach_email = models.ForeignKey(OutreachEmail, on_delete=models.SET_NULL, null=True, blank=True)
+    call_activity = models.ForeignKey(CallActivity, on_delete=models.SET_NULL, null=True, blank=True)
+    performed_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
-    
-    def __str__(self):
-        return f"{self.activity_type} log for {self.prospect.company_name} at {self.created_at}"

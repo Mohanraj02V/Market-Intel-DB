@@ -10,11 +10,21 @@ class ProspectOfferingSerializer(serializers.ModelSerializer):
 
 class ProspectContactSerializer(serializers.ModelSerializer):
     prospect_name = serializers.CharField(source='prospect.company_name', read_only=True)
-    
+    latest_call_status = serializers.SerializerMethodField()
+    latest_communication_outcome = serializers.SerializerMethodField()
+
+    def get_latest_call_status(self, obj):
+        latest = obj.call_activities.order_by('-created_at').first()
+        return latest.call_status if latest else None
+
+    def get_latest_communication_outcome(self, obj):
+        latest = obj.call_activities.order_by('-created_at').first()
+        return latest.communication_outcome if latest else None
+
     class Meta:
         model = ProspectContact
-        fields = ['id', 'prospect', 'prospect_name', 'contact_name', 'designation', 'official_email', 'phone_number', 'linkedin_profile', 'created_at', 'updated_at']
-        read_only_fields = ['id', 'prospect', 'prospect_name', 'created_at', 'updated_at']
+        fields = ['id', 'prospect', 'prospect_name', 'contact_name', 'designation', 'official_email', 'phone_number', 'linkedin_profile', 'latest_call_status', 'latest_communication_outcome', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'prospect', 'prospect_name', 'latest_call_status', 'latest_communication_outcome', 'created_at', 'updated_at']
 
 class ProspectSimpleSerializer(serializers.ModelSerializer):
     class Meta:
@@ -178,23 +188,8 @@ class LeadQualificationSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'prospect', 'pre_task_status', 'created_at', 'updated_at']
 
-from .models import CallbackReminder, OutreachLog
+from .models import CallbackReminder
 
-class OutreachLogSerializer(serializers.ModelSerializer):
-    created_by_name = serializers.SerializerMethodField()
-    
-    def get_created_by_name(self, obj):
-        if obj.created_by:
-            return obj.created_by.get_full_name() or obj.created_by.username
-        return 'System'
-    
-    class Meta:
-        model = OutreachLog
-        fields = [
-            'id', 'prospect', 'activity_type', 'status', 'outcome',
-            'notes', 'created_by', 'created_by_name', 'created_at'
-        ]
-        read_only_fields = ['id', 'created_at', 'created_by', 'created_by_name']
 
 class CallbackReminderSerializer(serializers.ModelSerializer):
     company_name = serializers.CharField(source='prospect.company_name', read_only=True)
@@ -207,3 +202,65 @@ class CallbackReminderSerializer(serializers.ModelSerializer):
             'notified_15m', 'notified_5m', 'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
+
+from .models import OutreachEmail, OutreachEmailRecipient, EmailAttachment, CallActivity, CommunicationActivity
+
+class EmailAttachmentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = EmailAttachment
+        fields = ['id', 'original_filename', 'mime_type', 'size', 'created_at']
+
+class OutreachEmailRecipientSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = OutreachEmailRecipient
+        fields = ['id', 'email_address', 'prospect_contact', 'recipient_type']
+
+class OutreachEmailSerializer(serializers.ModelSerializer):
+    recipients = OutreachEmailRecipientSerializer(many=True, read_only=True)
+    attachments = EmailAttachmentSerializer(many=True, read_only=True)
+    
+    class Meta:
+        model = OutreachEmail
+        fields = [
+            'id', 'prospect', 'created_by', 'sender_mail_account', 'from_email', 'from_name',
+            'subject', 'body', 'signature', 'status', 'sent_at', 'message_id', 'thread_id',
+            'in_reply_to', 'references', 'created_at', 'updated_at', 'recipients', 'attachments'
+        ]
+        read_only_fields = ['id', 'created_by', 'sender_mail_account', 'status', 'sent_at', 'message_id', 'thread_id', 'in_reply_to', 'references', 'created_at', 'updated_at']
+
+class CallActivitySerializer(serializers.ModelSerializer):
+    created_by_name = serializers.SerializerMethodField()
+    
+    def get_created_by_name(self, obj):
+        if obj.created_by:
+            return obj.created_by.get_full_name() or obj.created_by.username
+        return 'System'
+
+    class Meta:
+        model = CallActivity
+        fields = [
+            'id', 'prospect', 'prospect_contact', 'created_by', 'created_by_name',
+            'company_phone', 'ivr_extension', 'call_status', 'communication_outcome',
+            'notes', 'call_started_at', 'call_ended_at', 'created_at'
+        ]
+        read_only_fields = ['id', 'created_by', 'created_by_name', 'created_at']
+
+class CommunicationActivitySerializer(serializers.ModelSerializer):
+    performed_by_name = serializers.SerializerMethodField()
+    outreach_email_detail = OutreachEmailSerializer(source='outreach_email', read_only=True)
+    call_activity_detail = CallActivitySerializer(source='call_activity', read_only=True)
+    contact_name = serializers.CharField(source='prospect_contact.contact_name', read_only=True, allow_null=True)
+
+    def get_performed_by_name(self, obj):
+        if obj.performed_by:
+            return obj.performed_by.get_full_name() or obj.performed_by.username
+        return 'System'
+
+    class Meta:
+        model = CommunicationActivity
+        fields = [
+            'id', 'prospect', 'prospect_contact', 'contact_name', 'activity_type', 'direction',
+            'status', 'outcome', 'subject', 'notes', 'outreach_email', 'outreach_email_detail',
+            'call_activity', 'call_activity_detail', 'performed_by', 'performed_by_name', 'created_at'
+        ]
+        read_only_fields = ['id', 'performed_by', 'performed_by_name', 'created_at']

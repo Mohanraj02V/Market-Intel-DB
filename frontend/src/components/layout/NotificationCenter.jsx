@@ -15,7 +15,7 @@ export default function NotificationCenter() {
 
   const fetchReminders = async () => {
     try {
-      const res = await api.get('/prospects/reminders/pending/');
+      const res = await api.get('/reminders/pending/');
       const data = res.data;
       setReminders(data);
       checkNotifications(data);
@@ -56,7 +56,7 @@ export default function NotificationCenter() {
     
     // Mark as notified in backend
     try {
-      await api.patch(`/prospects/reminders/${reminder.id}/mark-notified/`, { interval });
+      await api.patch(`/reminders/${reminder.id}/mark-notified/`, { interval });
       // We don't necessarily need to fetch again immediately since we just patched,
       // but it will be updated on next poll.
     } catch (err) {
