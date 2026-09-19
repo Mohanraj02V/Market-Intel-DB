@@ -2,6 +2,7 @@ import React, { useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import { fetchProspectById, clearSelectedProspect } from '../features/prospects/prospectSlice';
+import CorporateStructureTree from '../components/prospects/CorporateStructureTree';
 import { ArrowLeft, Building2, Globe, Mail, Phone, MapPin, Network, Package, Users, Calendar } from 'lucide-react';
 
 const ProspectDetailPage = () => {

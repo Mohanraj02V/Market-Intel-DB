@@ -11,8 +11,8 @@ class MarketEventViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['host_country']
     search_fields = ['event_title', 'host_country']
-    ordering_fields = ['event_date', 'event_title', 'created_at']
-    ordering = ['-event_date']
+    ordering_fields = ['start_date', 'end_date', 'event_title', 'created_at']
+    ordering = ['-start_date']
 
     def get_queryset(self):
         # Always annotate with the count of participating companies

@@ -1,3 +1,4 @@
+import datetime
 import uuid
 from django.db import models
 from django.conf import settings
@@ -6,7 +7,8 @@ class MarketEvent(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     event_title = models.CharField(max_length=255)
     host_country = models.CharField(max_length=255)
-    event_date = models.DateField()
+    start_date = models.DateField(default=datetime.date.today)
+    end_date = models.DateField(default=datetime.date.today)
     
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

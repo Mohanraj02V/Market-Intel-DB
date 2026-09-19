@@ -5,7 +5,7 @@ import { createProspect, updateProspect } from '../../features/prospects/prospec
 import { X, Plus, Trash2, Building, Network } from 'lucide-react';
 import api from '../../services/api';
 
-const ProspectForm = ({ isOpen, onClose, prospect = null }) => {
+const ProspectForm = ({ isOpen, onClose, prospect = null, highlightFields = [], onSuccess = null }) => {
   const dispatch = useDispatch();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -216,6 +216,7 @@ const ProspectForm = ({ isOpen, onClose, prospect = null }) => {
       } else {
         await dispatch(createProspect(cleanData)).unwrap();
       }
+      if (onSuccess) onSuccess();
       onClose();
     } catch (err) {
       let errorMessage = 'An error occurred while saving.';
@@ -366,42 +367,42 @@ const ProspectForm = ({ isOpen, onClose, prospect = null }) => {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Company Name *</label>
-                  <input type="text" name="company_name" value={formData.company_name} onChange={handleChange} className="w-full rounded-lg border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm py-2 px-3 border text-slate-900" />
+                  <input type="text" name="company_name" value={formData.company_name} onChange={handleChange} className={`w-full rounded-lg  shadow-sm  sm:text-sm py-2 px-3 text-slate-900 ${highlightFields?.includes('company_name') ? 'border-2 border-red-500 bg-red-50/30 focus:border-red-500 focus:ring-red-500' : 'border border-slate-300 focus:border-indigo-500 focus:ring-indigo-500'}`} />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Country (Head Office) *</label>
-                  <input type="text" name="country_head_office" value={formData.country_head_office} onChange={handleChange} className="w-full rounded-lg border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm py-2 px-3 border text-slate-900" />
+                  <input type="text" name="country_head_office" value={formData.country_head_office} onChange={handleChange} className={`w-full rounded-lg  shadow-sm  sm:text-sm py-2 px-3 text-slate-900 ${highlightFields?.includes('country_head_office') ? 'border-2 border-red-500 bg-red-50/30 focus:border-red-500 focus:ring-red-500' : 'border border-slate-300 focus:border-indigo-500 focus:ring-indigo-500'}`} />
                 </div>
               </div>
 
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Complete Address *</label>
-                <textarea name="complete_address" rows="2" value={formData.complete_address} onChange={handleChange} className="w-full rounded-lg border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm py-2 px-3 border text-slate-900"></textarea>
+                <textarea name="complete_address" rows="2" value={formData.complete_address} onChange={handleChange} className={`w-full rounded-lg  shadow-sm  sm:text-sm py-2 px-3 text-slate-900 ${highlightFields?.includes('complete_address') ? 'border-2 border-red-500 bg-red-50/30 focus:border-red-500 focus:ring-red-500' : 'border border-slate-300 focus:border-indigo-500 focus:ring-indigo-500'}`}></textarea>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Official Phone Number</label>
-                  <input type="text" name="official_phone_number" value={formData.official_phone_number} onChange={handleChange} className="w-full rounded-lg border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm py-2 px-3 border text-slate-900" />
+                  <input type="text" name="official_phone_number" value={formData.official_phone_number} onChange={handleChange} className={`w-full rounded-lg  shadow-sm  sm:text-sm py-2 px-3 text-slate-900 ${highlightFields?.includes('official_phone_number') ? 'border-2 border-red-500 bg-red-50/30 focus:border-red-500 focus:ring-red-500' : 'border border-slate-300 focus:border-indigo-500 focus:ring-indigo-500'}`} />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Official Email Address</label>
-                  <input type="email" name="official_email_address" value={formData.official_email_address} onChange={handleChange} className="w-full rounded-lg border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm py-2 px-3 border text-slate-900" />
+                  <input type="email" name="official_email_address" value={formData.official_email_address} onChange={handleChange} className={`w-full rounded-lg  shadow-sm  sm:text-sm py-2 px-3 text-slate-900 ${highlightFields?.includes('official_email_address') ? 'border-2 border-red-500 bg-red-50/30 focus:border-red-500 focus:ring-red-500' : 'border border-slate-300 focus:border-indigo-500 focus:ring-indigo-500'}`} />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Official Website URL</label>
-                  <input type="url" name="official_website_url" value={formData.official_website_url} onChange={handleChange} className="w-full rounded-lg border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm py-2 px-3 border text-slate-900" />
+                  <input type="url" name="official_website_url" value={formData.official_website_url} onChange={handleChange} className={`w-full rounded-lg  shadow-sm  sm:text-sm py-2 px-3 text-slate-900 ${highlightFields?.includes('official_website_url') ? 'border-2 border-red-500 bg-red-50/30 focus:border-red-500 focus:ring-red-500' : 'border border-slate-300 focus:border-indigo-500 focus:ring-indigo-500'}`} />
                 </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">LinkedIn Company Page</label>
-                  <input type="url" name="linkedin_company_page" value={formData.linkedin_company_page} onChange={handleChange} className="w-full rounded-lg border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm py-2 px-3 border text-slate-900" />
+                  <input type="url" name="linkedin_company_page" value={formData.linkedin_company_page} onChange={handleChange} className={`w-full rounded-lg  shadow-sm  sm:text-sm py-2 px-3 text-slate-900 ${highlightFields?.includes('linkedin_company_page') ? 'border-2 border-red-500 bg-red-50/30 focus:border-red-500 focus:ring-red-500' : 'border border-slate-300 focus:border-indigo-500 focus:ring-indigo-500'}`} />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Primary Industries *</label>
-                  <input type="text" name="primary_industries" value={formData.primary_industries} onChange={handleChange} placeholder="e.g. Technology, Finance" className="w-full rounded-lg border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm py-2 px-3 border text-slate-900" />
+                  <input type="text" name="primary_industries" value={formData.primary_industries} onChange={handleChange} className={`w-full rounded-lg  shadow-sm  sm:text-sm py-2 px-3 text-slate-900 ${highlightFields?.includes('primary_industries') ? 'border-2 border-red-500 bg-red-50/30 focus:border-red-500 focus:ring-red-500' : 'border border-slate-300 focus:border-indigo-500 focus:ring-indigo-500'}`} />
                 </div>
               </div>
             </div>

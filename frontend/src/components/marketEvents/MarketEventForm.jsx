@@ -9,7 +9,8 @@ const MarketEventForm = ({ isOpen, onClose, initialData = null }) => {
   const [formData, setFormData] = useState({
     event_title: '',
     host_country: '',
-    event_date: '',
+    start_date: '',
+    end_date: '',
   });
 
   const [loading, setLoading] = useState(false);
@@ -21,13 +22,15 @@ const MarketEventForm = ({ isOpen, onClose, initialData = null }) => {
         setFormData({
           event_title: initialData.event_title || '',
           host_country: initialData.host_country || '',
-          event_date: initialData.event_date || '',
+          start_date: initialData.start_date || '',
+          end_date: initialData.end_date || '',
         });
       } else {
         setFormData({
           event_title: '',
           host_country: '',
-          event_date: '',
+          start_date: '',
+    end_date: '',
         });
       }
       setError(null);
@@ -149,18 +152,34 @@ const MarketEventForm = ({ isOpen, onClose, initialData = null }) => {
                 />
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
-                  Event Date <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="date"
-                  name="event_date"
-                  required
-                  value={formData.event_date}
-                  onChange={handleChange}
-                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-sm font-medium text-slate-900"
-                />
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
+                    Start Date <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    name="start_date"
+                    required
+                    value={formData.start_date}
+                    onChange={handleChange}
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-sm font-medium text-slate-900"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
+                    End Date <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    name="end_date"
+                    required
+                    value={formData.end_date}
+                    onChange={handleChange}
+                    min={formData.start_date}
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-sm font-medium text-slate-900"
+                  />
+                </div>
               </div>
 
             </div>

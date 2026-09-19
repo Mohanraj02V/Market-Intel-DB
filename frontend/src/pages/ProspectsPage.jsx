@@ -10,6 +10,7 @@ const ProspectsPage = () => {
   const dispatch = useDispatch();
   const { items, loading, error, count, next, previous } = useSelector((state) => state.prospects);
   const { items: marketEventsList } = useSelector((state) => state.marketEvents);
+  const { user } = useSelector((state) => state.auth);
   const [searchTerm, setSearchTerm] = useState('');
   const [marketEventFilter, setMarketEventFilter] = useState('');
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -65,6 +66,7 @@ const ProspectsPage = () => {
           </p>
         </div>
         <div className="mt-4 sm:mt-0">
+          {user?.role === 'PRE' && (
           <button
             onClick={handleAddClick}
             className="inline-flex items-center px-4 py-2 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors"
@@ -72,6 +74,7 @@ const ProspectsPage = () => {
             <Plus className="-ml-1 mr-2 h-5 w-5" aria-hidden="true" />
             Add Prospect
           </button>
+          )}
         </div>
       </div>
 
@@ -193,16 +196,23 @@ const ProspectsPage = () => {
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-600">{prospect.primary_industries}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                       <div className="flex justify-end gap-3 items-center">
-                          <Link to={`/prospects/${prospect.id}`} className="text-emerald-600 hover:text-emerald-900" title="View Details">
-                            <Eye size={18} />
-                          </Link>
-                        <button onClick={() => handleEditClick(prospect)} className="text-indigo-600 hover:text-indigo-900" title="Edit">
-                          <Edit2 size={18} />
-                        </button>
-                        <button onClick={() => handleDelete(prospect.id)} className="text-red-500 hover:text-red-700" title="Delete">
-                          <Trash2 size={18} />
-                        </button>
-                      </div>
+                        {user?.role === 'PRE' && (
+                          <>
+                            <Link to={`/prospects/${prospect.id}`} className="text-emerald-600 hover:text-emerald-900" title="View Details">
+                              <Eye size={18} />
+                            </Link>
+                            <button onClick={() => handleEditClick(prospect)} className="text-indigo-600 hover:text-indigo-900" title="Edit">
+                              <Edit2 size={18} />
+                            </button>
+                            <button onClick={() => handleDelete(prospect.id)} className="text-red-500 hover:text-red-700" title="Delete">
+                              <Trash2 size={18} />
+                            </button>
+                          </>
+                        )}
+                        {user?.role === 'LQ' && (
+                          <span className="text-xs text-slate-400 italic">No actions available</span>
+                        )}
+                        </div>
                     </td>
                   </tr>
                 ))

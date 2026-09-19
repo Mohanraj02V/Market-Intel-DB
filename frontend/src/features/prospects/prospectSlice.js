@@ -91,6 +91,10 @@ const prospectSlice = createSlice({
         state.loading = false;
         state.selectedProspect = action.payload;
       })
+      .addCase(fetchProspectById.rejected, (state, action) => {
+        state.loading = false;
+        state.error = action.error.message || "Failed to fetch prospect details";
+      })
       .addCase(createProspect.fulfilled, (state, action) => {
         state.items.unshift(action.payload);
         state.count += 1;

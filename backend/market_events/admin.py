@@ -4,9 +4,9 @@ from .models import MarketEvent, MarketEventParticipation
 
 @admin.register(MarketEvent)
 class MarketEventAdmin(admin.ModelAdmin):
-    list_display = ('event_title', 'host_country', 'event_date', 'participant_count', 'created_at')
+    list_display = ('event_title', 'host_country', 'start_date', 'end_date', 'participant_count', 'created_at')
     search_fields = ('event_title', 'host_country')
-    list_filter = ('host_country', 'event_date')
+    list_filter = ('host_country', 'start_date', 'end_date')
     
     def get_queryset(self, request):
         qs = super().get_queryset(request)

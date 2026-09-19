@@ -9,12 +9,21 @@ class ProspectOfferingSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'created_at']
 
 class ProspectContactSerializer(serializers.ModelSerializer):
+    prospect_name = serializers.CharField(source='prospect.company_name', read_only=True)
+    
     class Meta:
         model = ProspectContact
-        fields = ['id', 'contact_name', 'designation', 'official_email', 'phone_number', 'linkedin_profile', 'created_at', 'updated_at']
-        read_only_fields = ['id', 'created_at', 'updated_at']
+        fields = ['id', 'prospect', 'prospect_name', 'contact_name', 'designation', 'official_email', 'phone_number', 'linkedin_profile', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'prospect', 'prospect_name', 'created_at', 'updated_at']
+
+class ProspectSimpleSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Prospect
+        fields = ['id', 'company_name', 'country_head_office', 'primary_industries', 'company_structure', 'operational_status']
 
 class ProspectSerializer(serializers.ModelSerializer):
+    parent_companies_detail = ProspectSimpleSerializer(source='parent_companies', many=True, read_only=True)
+    child_companies_detail = ProspectSimpleSerializer(source='child_companies', many=True, read_only=True)
     products = serializers.SerializerMethodField()
     services = serializers.SerializerMethodField()
     solutions = serializers.SerializerMethodField()
@@ -34,7 +43,7 @@ class ProspectSerializer(serializers.ModelSerializer):
             'id', 'company_name', 'country_head_office', 'complete_address', 
             'official_phone_number', 'official_email_address', 'official_website_url', 
             'linkedin_company_page', 'primary_industries', 'company_structure', 
-            'operational_status', 'parent_companies', 'status_target', 
+            'operational_status', 'parent_companies', 'parent_companies_detail', 'child_companies_detail', 'status_target', 
             'primary_offering_type', 'products', 'services', 'solutions', 
             'offerings_data', 'key_contacts', 'created_at', 'updated_at', 
             'created_by', 'updated_by', 'market_events', 'market_event_ids'
@@ -152,3 +161,49 @@ class ProspectSerializer(serializers.ModelSerializer):
                 ProspectContact.objects.create(prospect=instance, **contact)
                 
         return instance
+
+from .models import LeadQualification
+
+class LeadQualificationSerializer(serializers.ModelSerializer):
+    prospect = ProspectSerializer(read_only=True)
+    
+    class Meta:
+        model = LeadQualification
+        fields = [
+            'id', 'prospect', 'verification_status', 'pre_task_status',
+            'qualification_status', 'qualification_score', 'lq_notes',
+            'email_status', 'budget', 'authority', 'need', 'timeline',
+            'verification_checklist', 'issue_category', 'issue_details',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'prospect', 'pre_task_status', 'created_at', 'updated_at']
+
+from .models import CallbackReminder, OutreachLog
+
+class OutreachLogSerializer(serializers.ModelSerializer):
+    created_by_name = serializers.SerializerMethodField()
+    
+    def get_created_by_name(self, obj):
+        if obj.created_by:
+            return obj.created_by.get_full_name() or obj.created_by.username
+        return 'System'
+    
+    class Meta:
+        model = OutreachLog
+        fields = [
+            'id', 'prospect', 'activity_type', 'status', 'outcome',
+            'notes', 'created_by', 'created_by_name', 'created_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'created_by', 'created_by_name']
+
+class CallbackReminderSerializer(serializers.ModelSerializer):
+    company_name = serializers.CharField(source='prospect.company_name', read_only=True)
+    
+    class Meta:
+        model = CallbackReminder
+        fields = [
+            'id', 'prospect', 'company_name', 'scheduled_datetime', 
+            'description', 'is_completed', 'notified_30m', 
+            'notified_15m', 'notified_5m', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']

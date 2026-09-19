@@ -1,0 +1,860 @@
+import React, { useState, useEffect } from 'react';
+import { 
+  CheckCircle,
+  AlertTriangle,
+  Phone,
+  Mail,
+  Lock,
+  ChevronDown,
+  ChevronUp,
+  TrendingUp,
+  Clock,
+  Shield,
+  ArrowLeft,
+  X,
+  Building2
+} from 'lucide-react';
+import api from '../../services/api';
+
+export default function LqWorkspaceModal({ 
+  selectedLq,
+  initialTab = 'verification',
+  onClose,
+  hasIncorrect,
+  allCorrect,
+  verificationFields,
+  handleFieldToggle,
+  handleSubmitIssue,
+  handleReadyForOutreach
+}) {
+  const [activeTab, setActiveTab] = useState(initialTab);
+  
+  // Get safe prospect reference
+  const prospect = selectedLq?.prospect || {};
+  const isVerified = selectedLq?.verification_status === 'Verified';
+  const isProspectSelected = selectedLq?.qualification_status === 'Prospect Selected';
+
+  // --- OUTREACH  // Outreach State
+  // Initialize from prop, but will be overridden by fresh fetch below
+  const [emailProgress, setEmailProgress] = useState(selectedLq?.email_status || 'Not Sent');
+  const [emailCollapsed, setEmailCollapsed] = useState(selectedLq?.email_status && selectedLq.email_status !== 'Not Sent');
+  const [selectedRecipients, setSelectedRecipients] = useState(prospect.official_email_address ? [prospect.official_email_address] : []);
+  const [customRecipientInput, setCustomRecipientInput] = useState('');
+  const [emailSubject, setEmailSubject] = useState(`Company Introduction & Solutions Overview — ${prospect.company_name || ''}`);
+  const [emailBody, setEmailBody] = useState(`Dear ${prospect.company_name || 'Team'},\n\nWe are pleased to introduce our solution portfolio tailored for ${prospect.primary_industries || 'your industry'}. We would love to schedule a brief introductory discussion to explore potential alignment.\n\nBest regards,\nLead Qualification Team`);
+
+  // Call Outcome State
+  const [callStatus, setCallStatus] = useState('Connected');
+  const [ivrExtension, setIvrExtension] = useState('');
+  const [communicationOutcome, setCommunicationOutcome] = useState(selectedLq?.qualification_status === 'Prospect Selected' ? 'Prospect Selected' : '');
+  const [callTranscriptNotes, setCallTranscriptNotes] = useState('');
+  
+  // Detailed Call Form Fields
+  const [requestedEmailConfirm, setRequestedEmailConfirm] = useState(prospect.official_email_address || '');
+  const [callbackDate, setCallbackDate] = useState('');
+  const [callbackTime, setCallbackTime] = useState('');
+  const [callbackDescription, setCallbackDescription] = useState('');
+  const [transferredPersonName, setTransferredPersonName] = useState('');
+  const [transferredDesignation, setTransferredDesignation] = useState('');
+  const [sharedContactName, setSharedContactName] = useState('');
+  const [sharedContactDesignation, setSharedContactDesignation] = useState('');
+  const [sharedContactPhone, setSharedContactPhone] = useState('');
+  const [sharedContactEmail, setSharedContactEmail] = useState('');
+  
+  const [duplicateContact, setDuplicateContact] = useState(null);
+  const [useDuplicateContact, setUseDuplicateContact] = useState(false);
+
+  useEffect(() => {
+    if ((sharedContactEmail && sharedContactEmail.trim()) || (sharedContactPhone && sharedContactPhone.trim())) {
+      const found = prospect?.key_contacts?.find(c => 
+        (sharedContactEmail && c.official_email && c.official_email.toLowerCase() === sharedContactEmail.toLowerCase()) ||
+        (sharedContactPhone && c.phone_number && c.phone_number === sharedContactPhone)
+      );
+      if (found) {
+        setDuplicateContact(found);
+      } else {
+        setDuplicateContact(null);
+        setUseDuplicateContact(false);
+      }
+    } else {
+      setDuplicateContact(null);
+      setUseDuplicateContact(false);
+    }
+  }, [sharedContactEmail, sharedContactPhone, prospect]);
+  const [notInterestedReason, setNotInterestedReason] = useState('');
+  const [prospectSelectedDescription, setProspectSelectedDescription] = useState('');
+
+  // Backend Outreach Logs State
+  const [outreachLogs, setOutreachLogs] = useState([]);
+  
+  // === KEY FIX: On mount, always fetch fresh LQ data + outreach logs from backend ===
+  // This ensures that email_status and communication history are NOT stale from props
+  useEffect(() => {
+    if (selectedLq?.id && prospect?.id) {
+      // Fetch fresh LQ data to get persisted email_status
+      api.get(`/lq-pipeline/${selectedLq.id}/`)
+        .then(res => {
+          const freshStatus = res.data?.email_status || 'Not Sent';
+          setEmailProgress(freshStatus);
+          setEmailCollapsed(freshStatus !== 'Not Sent');
+        })
+        .catch(err => console.error('Failed to fetch fresh LQ data', err));
+      
+      // Also fetch outreach logs immediately on open (not just on tab switch)
+      fetchOutreachLogs();
+    }
+  }, [selectedLq?.id]);
+  
+  const fetchOutreachLogs = async () => {
+    try {
+      const res = await api.get(`/outreach-logs/?prospect=${prospect.id}`);
+      const logs = res.data.results || res.data;
+      setOutreachLogs(logs);
+      
+      const latestCall = logs.find(log => log.activity_type === 'Call');
+      if (latestCall) {
+        setCommunicationOutcome(prev => prev || latestCall.outcome || '');
+        setCallStatus(prev => (prev === 'Connected' && latestCall.status && latestCall.status !== 'Connected') ? latestCall.status : prev);
+      }
+    } catch (err) {
+      console.error("Failed to fetch outreach logs", err);
+    }
+  };
+  const isEmailSent = ['Sent', 'Waiting for Response', 'Received Response'].includes(emailProgress);
+
+  const toggleRecipient = (email) => {
+    if (selectedRecipients.includes(email)) {
+      setSelectedRecipients(selectedRecipients.filter(e => e !== email));
+    } else {
+      setSelectedRecipients([...selectedRecipients, email]);
+    }
+  };
+
+  const handleAddCustomRecipient = (e) => {
+    e.preventDefault();
+    if (customRecipientInput.trim() && !selectedRecipients.includes(customRecipientInput.trim())) {
+      setSelectedRecipients([...selectedRecipients, customRecipientInput.trim()]);
+      setCustomRecipientInput('');
+    }
+  };
+
+  const handleSendIntroEmail = async (e) => {
+    e.preventDefault();
+    if (selectedRecipients.length === 0) return;
+    setEmailProgress('Sent');
+    setEmailCollapsed(true);
+    
+    try {
+      await api.patch(`/lq-pipeline/${selectedLq.id}/`, { email_status: 'Sent' });
+      await api.post('/outreach-logs/', {
+        prospect: prospect.id,
+        activity_type: 'Email',
+        status: 'Sent',
+        notes: `Intro Email sent to [${selectedRecipients.join(', ')}]. Subject: ${emailSubject}`
+      });
+      fetchOutreachLogs();
+    } catch (err) {
+      console.error("Failed to log email", err);
+    }
+  };
+
+  const handleUpdateEmailProgressStatus = async (status) => {
+    setEmailProgress(status);
+    if (['Sent', 'Waiting for Response', 'Received Response'].includes(status)) {
+      setEmailCollapsed(true);
+    }
+    
+    try {
+      await api.patch(`/lq-pipeline/${selectedLq.id}/`, { email_status: status });
+      await api.post('/outreach-logs/', {
+        prospect: prospect.id,
+        activity_type: 'Email',
+        status: status,
+        notes: `Email Progress updated to: ${status}`
+      });
+      fetchOutreachLogs();
+    } catch (err) {
+      console.error("Failed to update email status", err);
+    }
+  };
+
+  const [callError, setCallError] = useState('');
+
+  const handleLogCallOutcome = async (e) => {
+    e.preventDefault();
+    setCallError('');
+
+    // === VALIDATION ===
+    // 1. If 'Connected', must select a communication outcome
+    if (callStatus === 'Connected' && !communicationOutcome) {
+      setCallError('Please select a Communication Progress Outcome (Step 2).');
+      return;
+    }
+    // 2. Call Back Later requires date and time
+    if (callStatus === 'Connected' && communicationOutcome === 'Call Back Later') {
+      if (!callbackDate || !callbackTime) {
+        setCallError('Date and Time are required for "Call Back Later".');
+        return;
+      }
+    }
+    // 3b. Not Interested — description (reason) is MANDATORY
+    if (callStatus === 'Connected' && communicationOutcome === 'Not Interested') {
+      if (!notInterestedReason.trim()) {
+        setCallError('Description (Reason for Disinterest) is required for "Not Interested".');
+        return;
+      }
+    }
+    // 3c. Prospect Selected — description is MANDATORY
+    if (callStatus === 'Connected' && communicationOutcome === 'Prospect Selected') {
+      if (!prospectSelectedDescription.trim()) {
+        setCallError('Description is required for "Prospect Selected".');
+        return;
+      }
+    }
+    // 4. Prevent pure duplicate submissions (if user didn't pick the existing contact)
+    if (callStatus === 'Connected' && communicationOutcome === 'Shared Another Contact') {
+      if (!useDuplicateContact && duplicateContact) {
+        setCallError('This contact already exists. Please use "Select this contact" or enter a different contact.');
+        return;
+      }
+    }
+    // 5. Must have some meaningful content — at least notes or an outcome
+    if (!communicationOutcome && !callTranscriptNotes.trim() && callStatus === 'Connected') {
+      setCallError('Please add notes or select an outcome before saving.');
+      return;
+    }
+
+    // === BUILD LOG ===
+    let detailsParts = [`Call Status: ${callStatus}`];
+    if (ivrExtension.trim()) detailsParts.push(`IVR Ext: ${ivrExtension.trim()}`);
+    
+    if (callStatus === 'Connected' && communicationOutcome) {
+      if (communicationOutcome === 'Requested Email') detailsParts.push(`Outcome: Requested Email (Confirmed: ${requestedEmailConfirm})`);
+      else if (communicationOutcome === 'Call Back Later') {
+        detailsParts.push(`Outcome: Call Back Later (Scheduled: ${callbackDate} at ${callbackTime})`);
+        if (callbackDescription) detailsParts.push(`Description: ${callbackDescription}`);
+      }
+      else if (communicationOutcome === 'Call Transferred') detailsParts.push(`Outcome: Transferred to ${transferredPersonName} (${transferredDesignation})`);
+      else if (communicationOutcome === 'Shared Another Contact') detailsParts.push(`Outcome: Shared Contact ${sharedContactName} - ${sharedContactDesignation} (Ph: ${sharedContactPhone || 'N/A'}, Email: ${sharedContactEmail || 'N/A'})`);
+      else if (communicationOutcome === 'Not Interested') detailsParts.push(`Outcome: Not Interested (Reason: ${notInterestedReason})`);
+      else if (communicationOutcome === 'Prospect Selected') detailsParts.push(`Outcome: Prospect Selected (Notes: ${prospectSelectedDescription})`);
+    }
+    
+    if (callTranscriptNotes.trim()) detailsParts.push(`Notes: ${callTranscriptNotes.trim()}`);
+    
+    let callOutcome = communicationOutcome || '';
+    
+    try {
+      await api.post('/outreach-logs/', {
+        prospect: prospect.id,
+        activity_type: 'Call',
+        status: callStatus,
+        outcome: callOutcome,
+        notes: detailsParts.join(' | ')
+      });
+      fetchOutreachLogs();
+    } catch (err) {
+      console.error("Failed to log call outcome", err);
+      setCallError('Failed to save. Please try again.');
+      return;
+    }
+    
+    setCallTranscriptNotes('');
+    setCommunicationOutcome('');
+    setCallError('');
+
+    // If Call Back Later, save reminder to backend
+    if (callStatus === 'Connected' && communicationOutcome === 'Call Back Later' && callbackDate && callbackTime) {
+      try {
+        const datetimeString = `${callbackDate}T${callbackTime}:00`;
+        api.post('/reminders/', {
+          prospect: prospect.id,
+          scheduled_datetime: datetimeString,
+          description: callbackDescription || 'Call Back Later'
+        });
+        // Reset callback form
+        setCallbackDate('');
+        setCallbackTime('');
+        setCallbackDescription('');
+      } catch (error) {
+        console.error("Failed to schedule callback reminder", error);
+      }
+    }
+
+    // If Shared Another Contact and NOT a duplicate, save to backend
+    if (callStatus === 'Connected' && communicationOutcome === 'Shared Another Contact' && sharedContactName.trim() && !useDuplicateContact) {
+      try {
+        await api.post(`/prospects/${prospect.id}/add-contact/`, {
+          contact_name: sharedContactName.trim(),
+          designation: sharedContactDesignation.trim(),
+          official_email: sharedContactEmail.trim(),
+          phone_number: sharedContactPhone.trim()
+        });
+      } catch (error) {
+        console.error("Failed to add key contact", error);
+      }
+    }
+    // Always reset shared contact form
+    if (communicationOutcome === 'Shared Another Contact') {
+      setSharedContactName('');
+      setSharedContactDesignation('');
+      setSharedContactPhone('');
+      setSharedContactEmail('');
+      setDuplicateContact(null);
+      setUseDuplicateContact(false);
+    }
+
+    // === STATUS UPDATES & MODAL CLOSE AFTER SAVE ===
+    // Not Interested → set qualification_status to 'Budget Frozen' + close outreach
+    if (callStatus === 'Connected' && communicationOutcome === 'Not Interested') {
+      try {
+        await api.patch(`/lq-pipeline/${selectedLq.id}/`, { qualification_status: 'Budget Frozen' });
+      } catch (err) {
+        console.error('Failed to update qualification status to Budget Frozen', err);
+      }
+      setNotInterestedReason('');
+      onClose(); // close the modal — outreach is done
+      return;
+    }
+
+    // Prospect Selected → set qualification_status to 'Prospect Selected' + close
+    if (callStatus === 'Connected' && communicationOutcome === 'Prospect Selected') {
+      try {
+        await api.patch(`/lq-pipeline/${selectedLq.id}/`, { qualification_status: 'Prospect Selected' });
+      } catch (err) {
+        console.error('Failed to update qualification status to Prospect Selected', err);
+      }
+      setProspectSelectedDescription('');
+      onClose(); // close the modal
+      return;
+    }
+  };
+
+  const getFieldValue = (key) => {
+    switch (key) {
+      case 'companyName': return prospect.company_name || '-';
+      case 'country': return prospect.country_head_office || '-';
+      case 'address': return prospect.complete_address || '-';
+      case 'website': return prospect.official_website_url || '-';
+      case 'linkedIn': return prospect.linkedin_company_page || '-';
+      case 'email': return prospect.official_email_address || '-';
+      case 'contactNo': return prospect.official_phone_number || '-';
+      case 'productService': return prospect.primary_offering_type || '-';
+      default: return '-';
+    }
+  };
+
+  const fieldNames = {
+    companyName: 'Company Name',
+    country: 'Country',
+    address: 'Address',
+    website: 'Website',
+    linkedIn: 'LinkedIn Page',
+    email: 'Official Email',
+    contactNo: 'Contact No.',
+    productService: 'Product, Service & Solution'
+  };
+
+  // Helper for automated issues
+  const incorrectFields = Object.keys(verificationFields).filter(key => verificationFields[key] === 'Incorrect');
+  const autoIssueCategory = incorrectFields.map(key => fieldNames[key]).join(', ');
+  const autoDetails = incorrectFields.length > 0 
+    ? `The following fields are incorrect and need to be fixed by PRE:\n${incorrectFields.map(k => `- ${fieldNames[k]}`).join('\n')}` 
+    : '';
+
+  return (
+    <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4 z-50 font-sans">
+      <div className="bg-white rounded-2xl shadow-2xl max-w-5xl w-full overflow-hidden border border-slate-200 flex flex-col max-h-[92vh]">
+        {/* Modal Header */}
+        <div className="bg-gradient-to-r from-emerald-950 via-slate-900 to-indigo-950 p-5 text-white flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] uppercase tracking-wider font-extrabold px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-400/30">
+                  Lead Qualification & Outreach Workspace
+                </span>
+                <span className="text-[10px] font-extrabold px-2 py-0.5 rounded bg-emerald-600 text-white flex items-center gap-1">
+                  <Building2 className="w-3 h-3" /> {prospect.company_structure || 'Company'}
+                </span>
+              </div>
+              <h3 className="text-xl font-bold text-white mt-1">{prospect.company_name}</h3>
+            </div>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-white p-1.5 rounded-xl hover:bg-slate-800 transition cursor-pointer">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Modal Navigation Tabs */}
+        {initialTab !== 'outreach' && (
+          <div className="bg-slate-100 border-b border-slate-200 px-6 pt-3 flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => setActiveTab('verification')}
+              className={`px-4 py-2.5 font-extrabold text-xs rounded-t-xl transition flex items-center gap-2 cursor-pointer ${
+                activeTab === 'verification' ? 'bg-white text-slate-900 border-t-2 border-sky-600 shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+              }`}
+            >
+              <Shield className={`w-4 h-4 ${activeTab === 'verification' ? 'text-sky-600' : 'text-slate-400'}`} />
+              <span>Field Verification & Data Details</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('outreach')}
+              className={`px-4 py-2.5 font-extrabold text-xs rounded-t-xl transition flex items-center gap-2 cursor-pointer ${
+                activeTab === 'outreach' ? 'bg-white text-slate-900 border-t-2 border-emerald-600 shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+              }`}
+            >
+              {isVerified ? (
+                <Phone className={`w-4 h-4 ${activeTab === 'outreach' ? 'text-emerald-600' : 'text-slate-400'}`} />
+              ) : (
+                <Lock className="w-4 h-4 text-amber-500" />
+              )}
+              <span>Outreach & Call Outcomes</span>
+              {!isVerified && <span className="px-1.5 py-0.5 bg-amber-100 text-amber-800 text-[10px] rounded font-bold border border-amber-300">Locked</span>}
+            </button>
+          </div>
+        )}
+
+        {/* Modal Scrollable Content Body */}
+        <div className="p-6 overflow-y-auto flex-1 space-y-6 bg-slate-50">
+          {activeTab === 'verification' && (
+            <div className="space-y-6">
+              <div className="p-4 bg-sky-50 border border-sky-200 rounded-xl flex items-start gap-3">
+                <div className="w-8 h-8 rounded-full bg-sky-600 text-white font-black flex items-center justify-center shrink-0 mt-0.5 text-sm">
+                  <Shield className="w-4 h-4" />
+                </div>
+                <div>
+                  <h4 className="font-extrabold text-sky-950 text-sm">Prospect Field Verification Workspace</h4>
+                  <p className="text-xs text-sky-800 mt-0.5">Validate master prospect information before initiating outreach.</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Left Side: PRE Master Data */}
+                <div className="space-y-4">
+                  <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                    <div className="flex items-center justify-between mb-4 pb-2 border-b border-slate-100">
+                      <h3 className="font-bold text-slate-800">PRE Master Data</h3>
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider bg-slate-100 px-2 py-1 rounded">Read-Only</span>
+                    </div>
+                    <div className="space-y-3">
+                      <div>
+                        <span className="block text-[10px] font-bold text-slate-400 uppercase">Company Name:</span>
+                        <span className="font-medium text-sm text-slate-900">{prospect.company_name}</span>
+                      </div>
+                      <div>
+                        <span className="block text-[10px] font-bold text-slate-400 uppercase">Country:</span>
+                        <span className="font-medium text-sm text-slate-900">{prospect.country_head_office}</span>
+                      </div>
+                      <div>
+                        <span className="block text-[10px] font-bold text-slate-400 uppercase">Industries:</span>
+                        <span className="font-medium text-sm text-slate-900">{prospect.primary_industries}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {hasIncorrect && (
+                    <div className="bg-amber-50 p-5 rounded-xl border border-amber-200 shadow-sm">
+                      <h3 className="font-bold text-amber-900 mb-3 flex items-center gap-2">
+                        <AlertTriangle className="w-4 h-4 text-amber-600" />
+                        Issue Report (Auto-Generated)
+                      </h3>
+                      <div className="space-y-3">
+                        <div>
+                          <label className="block text-[10px] font-bold text-amber-700 uppercase mb-1">Issue Category</label>
+                          <input readOnly type="text" className="w-full p-2 border border-amber-200 rounded-lg text-sm bg-white text-amber-900 font-medium" value={autoIssueCategory} />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-bold text-amber-700 uppercase mb-1">Details</label>
+                          <textarea readOnly className="w-full p-2 border border-amber-200 rounded-lg text-sm bg-white text-amber-900 font-medium" rows="3" value={autoDetails}></textarea>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Right Side: Verification Checklist */}
+                <div className="space-y-4">
+                  <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                    <h3 className="font-bold text-slate-800 mb-4 pb-2 border-b border-slate-100">Verification Checklist</h3>
+                    <div className="space-y-3">
+                      {Object.entries(fieldNames).map(([key, label]) => (
+                        <div key={key} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 bg-slate-50 border border-slate-100 rounded-lg">
+                          <div className="flex-1 min-w-0 pr-4">
+                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">{label}</label>
+                            <div className="text-sm font-medium text-slate-900 truncate" title={getFieldValue(key)}>{getFieldValue(key)}</div>
+                          </div>
+                          <div className="flex bg-white rounded-lg border border-slate-200 overflow-hidden shrink-0 shadow-sm mt-2 sm:mt-0">
+                            <button
+                              type="button"
+                              onClick={() => handleFieldToggle(key, 'Correct')}
+                              className={`px-3 py-1.5 text-xs font-bold transition ${verificationFields[key] === 'Correct' ? 'bg-emerald-600 text-white' : 'text-slate-500 hover:bg-slate-50'}`}
+                            >Correct</button>
+                            <button
+                              type="button"
+                              onClick={() => handleFieldToggle(key, 'Incorrect')}
+                              className={`px-3 py-1.5 text-xs font-bold transition border-l border-slate-200 ${verificationFields[key] === 'Incorrect' ? 'bg-amber-600 text-white' : 'text-slate-500 hover:bg-slate-50'}`}
+                            >Incorrect</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="flex justify-end gap-3 pt-4 border-t border-slate-200">
+                {hasIncorrect ? (
+                  <button onClick={handleSubmitIssue} className="px-5 py-2 text-sm font-bold text-white bg-amber-600 hover:bg-amber-700 rounded-lg transition shadow-sm flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4" /> Submit Issue to PRE
+                  </button>
+                ) : allCorrect ? (
+                  <button onClick={() => { handleReadyForOutreach(); setActiveTab('outreach'); }} className="px-5 py-2 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition shadow-sm flex items-center gap-2">
+                    <CheckCircle className="w-4 h-4" /> Ready for Outreach
+                  </button>
+                ) : (
+                  <button disabled className="px-5 py-2 text-sm font-bold text-slate-400 bg-slate-100 rounded-lg cursor-not-allowed">
+                    Verify All Fields
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'outreach' && (
+            <div className="space-y-6">
+              {!isVerified ? (
+                <div className="p-8 bg-white border border-slate-200 rounded-2xl text-center space-y-4 shadow-sm">
+                  <div className="w-14 h-14 rounded-full bg-amber-100 text-amber-700 mx-auto flex items-center justify-center font-black shadow-sm">
+                    <Lock className="w-7 h-7 text-amber-600" />
+                  </div>
+                  <div>
+                    <span className="px-2.5 py-1 rounded bg-amber-100 text-amber-800 font-extrabold text-[11px] uppercase tracking-wider border border-amber-200">Verification Required</span>
+                    <h4 className="text-lg font-black text-slate-900 mt-2">🔒 Outreach & Call Outcomes Locked</h4>
+                    <p className="text-sm text-slate-600 mt-1 max-w-md mx-auto leading-relaxed">Outreach features activate only after the prospect’s 8 data fields are fully verified.</p>
+                  </div>
+                  <button onClick={() => setActiveTab('verification')} className="px-5 py-2.5 bg-sky-600 hover:bg-sky-700 text-white font-extrabold text-sm rounded-xl transition cursor-pointer shadow-md inline-flex items-center gap-2">
+                    <Shield className="w-4 h-4" /> Go to Field Verification
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  {/* Email Section */}
+                  <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+                    <div className="bg-gradient-to-r from-slate-900 to-indigo-950 p-4 text-white flex flex-col md:flex-row md:items-center justify-between gap-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-xl bg-indigo-500/20 text-indigo-300 border border-indigo-400/30 flex items-center justify-center font-bold shrink-0">
+                          <Mail className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h4 className="text-sm font-extrabold text-white">Company Introduction Email</h4>
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-extrabold uppercase border ${
+                              emailProgress === 'Sent' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-400/30' :
+                              emailProgress === 'Waiting for Response' ? 'bg-amber-500/20 text-amber-300 border-amber-400/30' :
+                              emailProgress === 'Received Response' ? 'bg-sky-500/20 text-sky-300 border-sky-400/30' :
+                              'bg-slate-700 text-slate-300 border-slate-600'
+                            }`}>Status: {emailProgress}</span>
+                          </div>
+                          <p className="text-xs text-slate-300 mt-0.5">{isEmailSent ? 'Email dispatched to prospect recipients.' : 'Send introductory email to enable call outcomes.'}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <div className="hidden sm:flex items-center gap-1 bg-slate-800/80 p-1 rounded-xl border border-slate-700/80 text-[11px]">
+                          {['Sent', 'Waiting for Response', 'Received Response'].map(st => (
+                            <button key={st} onClick={() => handleUpdateEmailProgressStatus(st)} className={`px-2.5 py-1 rounded-lg font-bold transition ${emailProgress === st ? 'bg-indigo-600 text-white' : 'text-slate-300 hover:text-white hover:bg-slate-700/60'}`}>{st}</button>
+                          ))}
+                        </div>
+                        <button onClick={() => setEmailCollapsed(!emailCollapsed)} className="px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white font-extrabold text-xs rounded-xl transition flex items-center gap-1.5 border border-white/10">
+                          {emailCollapsed ? <><span className="hidden sm:inline">Expand Draft</span><ChevronDown className="w-3.5 h-3.5" /></> : <><span className="hidden sm:inline">Collapse</span><ChevronUp className="w-3.5 h-3.5" /></>}
+                        </button>
+                      </div>
+                    </div>
+                    {!emailCollapsed && (
+                      <div className="p-5 bg-slate-50 border-t border-slate-200 space-y-4 text-xs">
+                        <div className="space-y-2">
+                          <label className="block font-extrabold text-slate-800 uppercase tracking-wider text-[10px]">Select Introduction Email Recipients</label>
+                          <div className="grid grid-cols-1 gap-2">
+                            {prospect.official_email_address && (
+                              <label className={`flex items-center gap-2.5 p-2.5 rounded-xl border transition cursor-pointer ${selectedRecipients.includes(prospect.official_email_address) ? 'bg-indigo-50 border-indigo-300 text-indigo-950 font-bold' : 'bg-white border-slate-200 text-slate-700'}`}>
+                                <input type="checkbox" checked={selectedRecipients.includes(prospect.official_email_address)} onChange={() => toggleRecipient(prospect.official_email_address)} className="accent-indigo-600" />
+                                <div className="overflow-hidden">
+                                  <span className="block truncate text-sm">{prospect.official_email_address}</span>
+                                  <span className="text-[10px] text-slate-400 font-semibold">Official Company Email</span>
+                                </div>
+                              </label>
+                            )}
+                            {!prospect.official_email_address && (
+                              <div className="p-2.5 rounded-xl border border-amber-200 bg-amber-50 text-amber-700 text-xs font-semibold">
+                                No official company email found for this prospect. Please update the prospect details.
+                              </div>
+                            )}
+                            {selectedRecipients.filter(email => email !== prospect.official_email_address).map((email) => (
+                              <label key={email} className="flex items-center gap-2.5 p-2.5 rounded-xl border transition cursor-pointer bg-slate-50 border-indigo-200 text-slate-800 font-bold">
+                                <input type="checkbox" checked={true} onChange={() => toggleRecipient(email)} className="accent-indigo-600" />
+                                <div className="overflow-hidden">
+                                  <span className="block truncate text-sm">{email}</span>
+                                  <span className="text-[10px] text-indigo-500 font-extrabold uppercase">CC</span>
+                                </div>
+                              </label>
+                            ))}
+                          </div>
+                          <div className="flex items-center gap-2 pt-1">
+                            <input type="email" value={customRecipientInput} onChange={(e) => setCustomRecipientInput(e.target.value)} placeholder="Add additional email address..." className="flex-1 p-2 bg-white border border-slate-200 rounded-xl text-xs font-medium" />
+                            <button type="button" onClick={handleAddCustomRecipient} className="px-3 py-2 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-xl text-xs cursor-pointer transition">Add Recipient</button>
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block font-extrabold text-slate-800 mb-1 uppercase tracking-wider text-[10px]">Email Subject</label>
+                          <input type="text" value={emailSubject} onChange={(e) => setEmailSubject(e.target.value)} className="w-full p-2.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-900 text-xs" />
+                        </div>
+                        <div>
+                          <label className="block font-extrabold text-slate-800 mb-1 uppercase tracking-wider text-[10px]">Email Message Content</label>
+                          <textarea rows={4} value={emailBody} onChange={(e) => setEmailBody(e.target.value)} className="w-full p-3 bg-white border border-slate-200 rounded-xl text-xs font-medium text-slate-800 leading-relaxed focus:outline-none focus:ring-2 focus:ring-indigo-500/20" />
+                        </div>
+                        <div className="flex items-center justify-between border-t border-slate-200 pt-3">
+                          <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-600">
+                            <span>Selected Recipients:</span><span className="px-2 py-0.5 rounded bg-indigo-100 text-indigo-800 font-extrabold">{selectedRecipients.length} Address(es)</span>
+                          </div>
+                          <button type="button" onClick={handleSendIntroEmail} disabled={selectedRecipients.length === 0 || isEmailSent} className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-black rounded-xl text-xs transition cursor-pointer shadow-sm flex items-center gap-2">
+                            <Mail className="w-4 h-4" /> <span>Send Introduction Email & Mark Sent</span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Call Section */}
+                  <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+                    <div className="bg-gradient-to-r from-emerald-950 via-slate-900 to-teal-950 p-4 text-white flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 flex items-center justify-center font-bold shrink-0"><Phone className="w-5 h-5" /></div>
+                        <div>
+                          <h4 className="text-sm font-extrabold text-white flex items-center gap-2">
+                            <span>Call Outcome & Communication Progress</span>
+                            {!isEmailSent && <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-400/30 text-[10px] uppercase font-extrabold flex items-center gap-1"><Lock className="w-3 h-3 text-amber-400" /> Locked</span>}
+                          </h4>
+                          <p className="text-xs text-slate-300 mt-0.5">Record phone call status, IVR extension, and live conversation outcomes.</p>
+                        </div>
+                      </div>
+                      {prospect.official_phone_number && (
+                        <a href={`tel:${prospect.official_phone_number}`} className="hidden sm:flex px-3 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-black text-xs rounded-xl transition items-center gap-1.5 shadow-sm">
+                          <Phone className="w-3.5 h-3.5" /> <span>Call {prospect.official_phone_number}</span>
+                        </a>
+                      )}
+                    </div>
+                    {!isEmailSent ? (
+                      <div className="p-8 bg-slate-50/80 text-center space-y-3 border-t border-slate-200">
+                        <div className="w-12 h-12 rounded-full bg-amber-100 text-amber-700 mx-auto flex items-center justify-center font-black">
+                          <Lock className="w-6 h-6 text-amber-600" />
+                        </div>
+                        <h5 className="font-extrabold text-slate-900 text-sm">Call Outcome Locked Until Email Marked as Sent</h5>
+                        <p className="text-xs text-slate-600 max-w-md mx-auto leading-relaxed">The Lead Qualifier must send the Company Introduction Email first.</p>
+                        <button type="button" onClick={() => setEmailCollapsed(false)} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl transition cursor-pointer inline-flex items-center gap-1.5 shadow-sm">
+                          <Mail className="w-3.5 h-3.5" /> <span>Open Company Introduction Email</span>
+                        </button>
+                      </div>
+                    ) : (
+                      <form onSubmit={handleLogCallOutcome} className="p-5 space-y-5 text-xs">
+                        <div className="p-3.5 bg-emerald-50/60 border border-emerald-200/80 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                          <div>
+                            <span className="font-extrabold text-emerald-950 text-xs flex items-center gap-1.5"><Phone className="w-4 h-4 text-emerald-700" /> Official Company Number: {prospect.official_phone_number || 'No phone'}</span>
+                            <p className="text-[11px] text-emerald-800 mt-0.5">Call the company official number to reach decision makers.</p>
+                          </div>
+                          <div className="flex items-center gap-2 w-full sm:w-auto">
+                            <label className="text-xs font-bold text-slate-700 whitespace-nowrap">IVR Ext:</label>
+                            <input type="text" value={ivrExtension} onChange={(e) => setIvrExtension(e.target.value)} placeholder="e.g. Ext. 104" className="p-2 bg-white border border-emerald-300 rounded-xl text-xs font-extrabold text-slate-900 w-28 focus:outline-none focus:ring-2 focus:ring-emerald-500/20" />
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block font-extrabold text-slate-800 mb-2 uppercase tracking-wider text-[10px]">1. Record Call Status Outcome</label>
+                          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                            {['Connected', 'No Answer', 'Busy', 'Switched Off', 'Invalid Number'].map(st => (
+                              <button key={st} type="button" onClick={() => setCallStatus(st)} className={`p-2.5 rounded-xl border text-center font-bold text-xs transition ${callStatus === st ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm' : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'}`}>{st}</button>
+                            ))}
+                          </div>
+                        </div>
+                        {callStatus === 'Connected' && (
+                          <div className="space-y-4 pt-2 border-t border-slate-200">
+                            <div>
+                              <label className="block font-extrabold text-slate-900 mb-1.5 uppercase tracking-wider text-[10px] flex items-center gap-1.5"><TrendingUp className="w-3.5 h-3.5 text-emerald-600" /><span>2. Record Communication Progress Outcome</span></label>
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                {['Requested Email', 'Call Back Later', 'Call Transferred', 'Shared Another Contact', 'Not Interested', 'Prospect Selected'].map(out => (
+                                  <button key={out} type="button" onClick={() => setCommunicationOutcome(out)} className={`p-2.5 rounded-xl border text-left font-extrabold text-xs transition flex items-center justify-between ${
+                                    communicationOutcome === out ?
+                                      out === 'Not Interested' ? 'bg-rose-50 border-rose-500 text-rose-950 shadow-sm' :
+                                      out === 'Prospect Selected' ? 'bg-emerald-50 border-emerald-500 text-emerald-950 shadow-sm' :
+                                      'bg-emerald-50 border-emerald-500 text-emerald-950 shadow-sm'
+                                    : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                                  }`}>
+                                    <span>{out}</span>{communicationOutcome === out && <CheckCircle className="w-4 h-4 text-emerald-600" />}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                            
+                            {/* Dynamic forms */}
+                            {communicationOutcome === 'Requested Email' && (
+                              <div className="p-3.5 bg-sky-50 border border-sky-200 rounded-xl space-y-2">
+                                <span className="font-extrabold text-sky-950 block text-xs">✉️ Prospect Requested Info Email</span>
+                                <label className="block text-[11px] font-bold text-slate-700">Confirm Email Address:</label>
+                                <input type="email" value={requestedEmailConfirm} onChange={(e) => setRequestedEmailConfirm(e.target.value)} className="w-full p-2 bg-white border border-sky-300 rounded-xl text-xs font-semibold" />
+                              </div>
+                            )}
+                            {communicationOutcome === 'Call Back Later' && (
+                              <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl space-y-3">
+                                <span className="font-extrabold text-amber-950 block text-xs">⏰ Prospect Requested Call Back Later</span>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                  <div>
+                                    <label className="block text-[11px] font-bold text-slate-700 mb-1">Date <span className="text-red-500">*</span></label>
+                                    <input type="date" required value={callbackDate} onChange={(e) => setCallbackDate(e.target.value)} className="w-full p-2 bg-white border border-amber-300 rounded-xl text-xs font-semibold" />
+                                  </div>
+                                  <div>
+                                    <label className="block text-[11px] font-bold text-slate-700 mb-1">Time <span className="text-red-500">*</span></label>
+                                    <input type="time" required value={callbackTime} onChange={(e) => setCallbackTime(e.target.value)} className="w-full p-2 bg-white border border-amber-300 rounded-xl text-xs font-semibold" />
+                                  </div>
+                                </div>
+                                <div>
+                                  <label className="block text-[11px] font-bold text-slate-700 mb-1">Description</label>
+                                  <textarea rows={2} value={callbackDescription} onChange={(e) => setCallbackDescription(e.target.value)} placeholder="Any specific context for this callback..." className="w-full p-2 bg-white border border-amber-300 rounded-xl text-xs font-semibold resize-none" />
+                                </div>
+                              </div>
+                            )}
+                            {communicationOutcome === 'Call Transferred' && (
+                              <div className="p-3.5 bg-indigo-50 border border-indigo-200 rounded-xl space-y-3">
+                                <span className="font-extrabold text-indigo-950 text-xs">🔄 Call Transferred to Decision Maker</span>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                  <div><label className="block text-[10px] font-bold text-slate-700 mb-0.5">Person Name:</label><input type="text" value={transferredPersonName} onChange={(e) => setTransferredPersonName(e.target.value)} className="w-full p-2 bg-white border border-indigo-300 rounded-xl" /></div>
+                                  <div><label className="block text-[10px] font-bold text-slate-700 mb-0.5">Designation:</label><input type="text" value={transferredDesignation} onChange={(e) => setTransferredDesignation(e.target.value)} className="w-full p-2 bg-white border border-indigo-300 rounded-xl" /></div>
+                                </div>
+                              </div>
+                            )}
+                            {communicationOutcome === 'Shared Another Contact' && (
+                              <div className="p-3.5 bg-purple-50 border border-purple-200 rounded-xl space-y-3">
+                                <span className="font-extrabold text-purple-950 text-xs block">👤 Shared Another Contact Information</span>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                  <div><label className="block text-[10px] font-bold text-slate-700 mb-0.5">Name:</label><input type="text" value={sharedContactName} onChange={(e) => setSharedContactName(e.target.value)} className="w-full p-2 bg-white border border-purple-300 rounded-xl" /></div>
+                                  <div><label className="block text-[10px] font-bold text-slate-700 mb-0.5">Designation:</label><input type="text" value={sharedContactDesignation} onChange={(e) => setSharedContactDesignation(e.target.value)} className="w-full p-2 bg-white border border-purple-300 rounded-xl" /></div>
+                                  <div><label className="block text-[10px] font-bold text-slate-700 mb-0.5">Phone:</label><input type="text" value={sharedContactPhone} onChange={(e) => setSharedContactPhone(e.target.value)} className="w-full p-2 bg-white border border-purple-300 rounded-xl" /></div>
+                                  <div><label className="block text-[10px] font-bold text-slate-700 mb-0.5">Email:</label><input type="email" value={sharedContactEmail} onChange={(e) => setSharedContactEmail(e.target.value)} className="w-full p-2 bg-white border border-purple-300 rounded-xl" /></div>
+                                </div>
+                                {duplicateContact && (
+                                  <div className="mt-2 p-2 bg-amber-100 border border-amber-300 rounded text-amber-900 text-xs flex flex-col sm:flex-row items-center justify-between gap-2">
+                                    <span>⚠️ This key contact already exists: <strong>{duplicateContact.contact_name} {duplicateContact.designation ? `(${duplicateContact.designation})` : ''}</strong></span>
+                                    <button 
+                                      type="button" 
+                                      onClick={() => {
+                                        setSharedContactName(duplicateContact.contact_name || '');
+                                        setSharedContactDesignation(duplicateContact.designation || '');
+                                        setSharedContactEmail(duplicateContact.official_email || '');
+                                        setSharedContactPhone(duplicateContact.phone_number || '');
+                                        setUseDuplicateContact(true);
+                                      }}
+                                      className="px-2 py-1 bg-amber-200 hover:bg-amber-300 text-amber-900 rounded font-bold transition whitespace-nowrap"
+                                    >
+                                      Select this contact
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                            {communicationOutcome === 'Not Interested' && (
+                              <div className="p-3.5 bg-rose-50 border border-rose-300 rounded-xl space-y-2">
+                                <span className="font-extrabold text-rose-950 text-xs block flex items-center gap-1.5">🚫 Company Not Interested — <span className="text-rose-600">Outreach will be closed after saving</span></span>
+                                <label className="block text-[11px] font-bold text-slate-700">Reason for Disinterest <span className="text-red-500">*</span></label>
+                                <input
+                                  type="text"
+                                  value={notInterestedReason}
+                                  onChange={(e) => setNotInterestedReason(e.target.value)}
+                                  placeholder="e.g. Budget frozen, not the right time..."
+                                  className={`w-full p-2 bg-white border rounded-xl text-xs font-semibold ${notInterestedReason.trim() ? 'border-rose-300' : 'border-red-400 ring-1 ring-red-300'}`}
+                                />
+                                <p className="text-[10px] text-rose-700 font-semibold">⚠️ Prospect Status will be set to <strong>Budget Frozen</strong>. The Outreach button will be disabled.</p>
+                              </div>
+                            )}
+                            {communicationOutcome === 'Prospect Selected' && (
+                              <div className="p-3.5 bg-emerald-50 border border-emerald-300 rounded-xl space-y-2">
+                                <span className="font-extrabold text-emerald-950 text-xs block">✅ Prospect Selected for Engagement</span>
+                                <label className="block text-[11px] font-bold text-slate-700">Description / Notes <span className="text-red-500">*</span></label>
+                                <textarea
+                                  rows={3}
+                                  value={prospectSelectedDescription}
+                                  onChange={(e) => setProspectSelectedDescription(e.target.value)}
+                                  placeholder="Describe why this prospect was selected, next steps, etc..."
+                                  className={`w-full p-2 bg-white border rounded-xl text-xs font-semibold resize-none ${prospectSelectedDescription.trim() ? 'border-emerald-300' : 'border-red-400 ring-1 ring-red-300'}`}
+                                />
+                                <p className="text-[10px] text-emerald-700 font-semibold">✅ Prospect Status will be set to <strong>Prospect Selected</strong>.</p>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        {/* Hide transcript when a structured outcome form is already capturing detail */}
+                        {!['Requested Email', 'Call Back Later', 'Call Transferred', 'Shared Another Contact', 'Not Interested', 'Prospect Selected'].includes(communicationOutcome) && (
+                          <div>
+                            <label className="block font-bold text-slate-800 mb-1">Call Transcript &amp; Discussion Summary</label>
+                            <textarea rows={3} value={callTranscriptNotes} onChange={(e) => setCallTranscriptNotes(e.target.value)} placeholder="Enter notes from call conversation..." className="w-full p-2.5 bg-white border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500/20 font-medium" />
+                          </div>
+                        )}
+                        <div className="flex flex-col gap-2 pt-1">
+                          {callError && (
+                            <div className="flex items-center gap-2 p-2.5 bg-red-50 border border-red-200 rounded-xl text-red-700 text-xs font-bold">
+                              <AlertTriangle className="w-4 h-4 shrink-0 text-red-500" />
+                              <span>{callError}</span>
+                            </div>
+                          )}
+                          <div className="flex justify-end">
+                            <button type="submit" className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl transition cursor-pointer shadow-sm flex items-center gap-2">
+                              <Phone className="w-4 h-4" /><span>Record Call Outcome &amp; Save Activity</span>
+                            </button>
+                          </div>
+                        </div>
+                      </form>
+                    )}
+                  </div>
+
+                  {/* Outreach Logs */}
+                  <div className="bg-white rounded-2xl border border-slate-200 p-5 space-y-3 shadow-sm">
+                    <h5 className="font-extrabold text-slate-900 text-xs uppercase tracking-wider flex items-center gap-2">
+                      <Clock className="w-4 h-4 text-slate-500" />
+                      <span>Communication History ({outreachLogs.length})</span>
+                    </h5>
+                    {outreachLogs.length > 0 ? (
+                      <div className="space-y-2.5 max-h-56 overflow-y-auto">
+                        {outreachLogs.map(log => (
+                          <div key={log.id} className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-xs space-y-1.5">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${log.activity_type === 'Call' ? 'bg-emerald-100 text-emerald-900' : 'bg-indigo-100 text-indigo-900'}`}>{log.activity_type}</span>
+                                {log.status && <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${log.activity_type === 'Call' ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-indigo-50 text-indigo-800 border-indigo-200'}`}>{log.activity_type}: {log.status}</span>}
+                                {log.outcome && <span className="px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-bold">Outcome: {log.outcome}</span>}
+                              </div>
+                              <span className="text-[10px] text-slate-400 font-semibold flex items-center gap-1">
+                                {new Date(log.created_at).toLocaleString()} 
+                                <span className="bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded ml-1">{log.created_by_name}</span>
+                              </span>
+                            </div>
+                            <p className="text-slate-700 font-medium whitespace-pre-line leading-relaxed">{log.notes}</p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-slate-400 italic p-4 text-center border border-dashed border-slate-200 rounded-xl">
+                        No communication logged yet for {prospect.company_name}. Complete the Introduction Email above to begin.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Modal Footer */}
+        <div className="p-4 bg-white border-t border-slate-200 flex items-center justify-end shrink-0">
+          <button onClick={onClose} className="px-5 py-2 bg-slate-800 hover:bg-slate-900 text-white text-sm font-bold rounded-xl transition cursor-pointer shadow-sm">
+            Done / Close Workspace
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
