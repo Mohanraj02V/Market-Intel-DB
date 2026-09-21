@@ -19,7 +19,6 @@ class ProspectViewSet(viewsets.ModelViewSet):
             permission_classes = [IsPRE]
         return [permission() for permission in permission_classes]
 
-    
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['company_structure', 'operational_status', 'country_head_office', 'primary_offering_type']
     search_fields = ['company_name', 'country_head_office', 'primary_industries']
@@ -41,6 +40,9 @@ class ProspectViewSet(viewsets.ModelViewSet):
         headers = self.get_success_headers(serializer.data)
         return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
+    def perform_create(self, serializer):
+        serializer.save()
+
     @action(detail=True, methods=['post'], url_path='add-contact')
     def add_contact(self, request, pk=None):
         prospect = self.get_object()
@@ -56,7 +58,6 @@ class ProspectViewSet(viewsets.ModelViewSet):
         existing_qs = ProspectContact.objects.filter(prospect=prospect)
         if official_email and official_email.strip():
             if existing_qs.filter(official_email__iexact=official_email.strip()).exists():
-                # Return the existing contact info instead of creating duplicate
                 existing = existing_qs.filter(official_email__iexact=official_email.strip()).first()
                 return Response({'status': 'duplicate', 'message': 'This contact already exists.', 'contact': {'id': str(existing.id), 'contact_name': existing.contact_name, 'designation': existing.designation, 'official_email': existing.official_email, 'phone_number': existing.phone_number}}, status=status.HTTP_200_OK)
         if phone_number and phone_number.strip():
@@ -76,8 +77,9 @@ class ProspectViewSet(viewsets.ModelViewSet):
 class LQPipelineViewSet(viewsets.ModelViewSet):
     serializer_class = LeadQualificationSerializer
     permission_classes = [IsPREOrLQ]
-    queryset = LeadQualification.objects.all().select_related('prospect').order_by('-updated_at')
-    
+    def get_queryset(self):
+        return LeadQualification.objects.all().select_related('prospect').order_by('-updated_at')
+
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['verification_status', 'pre_task_status', 'qualification_status']
     search_fields = ['prospect__company_name', 'prospect__country_head_office', 'prospect__primary_industries']
@@ -138,17 +140,18 @@ from .serializers import CallbackReminderSerializer
 class CallbackReminderViewSet(viewsets.ModelViewSet):
     serializer_class = CallbackReminderSerializer
     permission_classes = [IsAuthenticated]
-    
+
     def get_queryset(self):
         return CallbackReminder.objects.filter(is_completed=False).order_by('scheduled_datetime')
-        
+
+    def perform_create(self, serializer):
+        serializer.save()
+
     @action(detail=False, methods=['get'], url_path='pending')
     def pending(self, request):
-        now = timezone.now()
-        # Get active reminders
         reminders = self.get_queryset()
         return Response(self.get_serializer(reminders, many=True).data)
-        
+
     @action(detail=True, methods=['patch'], url_path='mark-notified')
     def mark_notified(self, request, pk=None):
         reminder = self.get_object()
@@ -163,13 +166,15 @@ class CallbackReminderViewSet(viewsets.ModelViewSet):
         return Response(self.get_serializer(reminder).data)
 
 
-
-
 class ProspectContactViewSet(viewsets.ModelViewSet):
     serializer_class = ProspectContactSerializer
     permission_classes = [IsPREOrLQ]
-    queryset = ProspectContact.objects.all().select_related('prospect').order_by('-created_at')
-    
+    def get_queryset(self):
+        return ProspectContact.objects.all().select_related('prospect').order_by('-created_at')
+
+    def perform_create(self, serializer):
+        serializer.save()
+
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['contact_name', 'official_email', 'prospect__company_name']
     ordering_fields = ['created_at', 'updated_at']
@@ -185,16 +190,11 @@ import utils.encryption as encryption
 
 class CommunicationActivityViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = CommunicationActivitySerializer
-    permission_classes = [IsPREOrLQ] # Assuming LQ can read, PRE may read too? The spec says 'PRE cannot access communication history'. So IsLQ.
-
-    def get_permissions(self):
-        # We need an IsLQ permission here. I'll just check it manually in get_queryset or define IsLQ.
-        # Actually I can define IsLQ here or just rely on get_queryset
-        return super().get_permissions()
+    permission_classes = [IsPREOrLQ]
 
     def get_queryset(self):
         if hasattr(self.request.user, 'profile') and self.request.user.profile.role != 'LQ':
-            return CommunicationActivity.objects.none() # Or raise PermissionDenied
+            return CommunicationActivity.objects.none()
         queryset = CommunicationActivity.objects.all().order_by('-created_at')
         prospect_id = self.request.query_params.get('prospect')
         if prospect_id:
@@ -237,9 +237,9 @@ class OutreachEmailViewSet(viewsets.ModelViewSet):
         if hasattr(request.user, 'profile') and request.user.profile.role != 'LQ':
             from rest_framework.exceptions import PermissionDenied
             raise PermissionDenied("Only LQ users can sync emails.")
-        
+
         from django.core.management import call_command
-        
+
         try:
             call_command('sync_imap')
             return Response({'message': 'IMAP Sync completed successfully.'}, status=status.HTTP_200_OK)
@@ -247,7 +247,7 @@ class OutreachEmailViewSet(viewsets.ModelViewSet):
             return Response({'error': f"Error running sync_imap: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     serializer_class = OutreachEmailSerializer
-    
+
     def get_queryset(self):
         if hasattr(self.request.user, 'profile') and self.request.user.profile.role != 'LQ':
             return OutreachEmail.objects.none()
@@ -261,42 +261,41 @@ class OutreachEmailViewSet(viewsets.ModelViewSet):
         if hasattr(self.request.user, 'profile') and self.request.user.profile.role != 'LQ':
             from rest_framework.exceptions import PermissionDenied
             raise PermissionDenied("Only LQ users can send emails.")
-        # We need to handle sending email via SMTP here.
         user = request.user
         mail_account = MailAccount.objects.filter(id=user.profile.mail_account_id, is_active=True).first()
         if not mail_account:
             return Response({'error': 'No active mail account found for the current user.'}, status=status.HTTP_400_BAD_REQUEST)
-        
+
         if mail_account.smtp_status != 'VERIFIED':
             return Response({'error': 'Sender SMTP account is not verified.'}, status=status.HTTP_400_BAD_REQUEST)
-        
+
         prospect_id = request.data.get('prospect')
         subject = request.data.get('subject')
         body = request.data.get('body') or ''
-        recipients_data = request.data.get('recipients', []) # Expected list of dicts: [{'email_address': '...', 'prospect_contact': 'id', 'type': 'TO'}]
-        
+        recipients_data = request.data.get('recipients', [])
+
         # Create EmailMessage
         msg = EmailMessage()
         msg['Subject'] = subject
         msg['From'] = f"{mail_account.display_name} <{mail_account.email_address}>"
-        
+
         to_emails = []
         cc_emails = []
         bcc_emails = []
-        
+
         import json
         if isinstance(recipients_data, str):
             recipients_data = json.loads(recipients_data)
-            
+
         # PRE-FLIGHT RECIPIENT CHECKS
         prospect = Prospect.objects.filter(id=prospect_id).first()
         if not prospect:
-             return Response({'error': 'Prospect not found.'}, status=status.HTTP_400_BAD_REQUEST)
-             
+            return Response({'error': 'Prospect not found.'}, status=status.HTTP_400_BAD_REQUEST)
+
         for rcpt in recipients_data:
             email = rcpt.get('email_address')
             contact_id = rcpt.get('prospect_contact')
-            
+
             # Check verification
             verification = EmailVerification.objects.filter(prospect=prospect, email_address=email).order_by('-updated_at').first()
             if not verification:
@@ -305,31 +304,31 @@ class OutreachEmailViewSet(viewsets.ModelViewSet):
                 return Response({'error': f'Recipient {email} verification is {verification.verification_status}.'}, status=status.HTTP_400_BAD_REQUEST)
             if not verification.confirmed_by_lq:
                 return Response({'error': f'Recipient {email} verification is valid but not confirmed by LQ.'}, status=status.HTTP_400_BAD_REQUEST)
-                
+
             rtype = rcpt.get('recipient_type', 'TO').upper()
             if rtype == 'TO': to_emails.append(email)
             elif rtype == 'CC': cc_emails.append(email)
             elif rtype == 'BCC': bcc_emails.append(email)
-            
+
         if to_emails: msg['To'] = ', '.join(to_emails)
         if cc_emails: msg['Cc'] = ', '.join(cc_emails)
         if bcc_emails: msg['Bcc'] = ', '.join(bcc_emails)
-        
+
         msg_id = make_msgid(domain=mail_account.email_address.split('@')[-1] if '@' in mail_account.email_address else 'local')
         msg['Message-ID'] = msg_id
-        
+
         full_body = body
         if mail_account.default_signature:
             full_body += f"\n\n{mail_account.default_signature}"
-            
+
         msg.set_content(full_body)
-        
+
         # Handle Attachments
         files = request.FILES.getlist('attachments')
         total_size = sum(f.size for f in files)
         if total_size > 25 * 1024 * 1024:
             return Response({'error': 'Total attachment size exceeds 25MB limit.'}, status=status.HTTP_400_BAD_REQUEST)
-            
+
         for f in files:
             if f.size > 10 * 1024 * 1024:
                 return Response({'error': f'File {f.name} exceeds 10MB limit.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -338,7 +337,7 @@ class OutreachEmailViewSet(viewsets.ModelViewSet):
                 return Response({'error': f'File type .{ext} is not allowed.'}, status=status.HTTP_400_BAD_REQUEST)
             msg.add_attachment(f.read(), maintype='application', subtype='octet-stream', filename=f.name)
             f.seek(0)
-            
+
         # Send via SMTP
         try:
             password = encryption.decrypt_password(mail_account.smtp_app_password_encrypted)
@@ -351,16 +350,14 @@ class OutreachEmailViewSet(viewsets.ModelViewSet):
             server.send_message(msg)
             server.quit()
         except smtplib.SMTPRecipientsRefused as e:
-            # Permanent recipient failure
-            for rcpt_email, (code, msg) in e.recipients.items():
+            for rcpt_email, (code, msg_bytes) in e.recipients.items():
                 if code >= 500:
                     verification = EmailVerification.objects.filter(prospect=prospect, email_address=rcpt_email).first()
                     if verification:
                         verification.verification_status = 'INVALID'
-                        verification.reason = f'Permanent SMTP failure: {code} {msg.decode("utf-8", errors="ignore")}'
+                        verification.reason = f'Permanent SMTP failure: {code} {msg_bytes.decode("utf-8", errors="ignore")}'
                         verification.save()
-                        
-                        # Trigger PRE Task
+
                         lq = prospect.lead_qualification
                         lq.pre_task_status = LeadQualification.PreTaskStatus.ISSUE_SENT_TO_PRE
                         lq.issue_category = 'Email Verification'
@@ -368,8 +365,8 @@ class OutreachEmailViewSet(viewsets.ModelViewSet):
                         lq.save()
             return Response({'error': 'Email could not be delivered to one or more recipients. A verification task has been sent to PRE.'}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
-            return Response({'error': f'SMTP Send failed. Please verify configuration.'}, status=status.HTTP_400_BAD_REQUEST)
-            
+            return Response({'error': 'SMTP Send failed. Please verify configuration.'}, status=status.HTTP_400_BAD_REQUEST)
+
         # Persistence
         outreach_email = OutreachEmail.objects.create(
             prospect=prospect,
@@ -383,9 +380,9 @@ class OutreachEmailViewSet(viewsets.ModelViewSet):
             status='WAITING FOR RESPONSE',
             sent_at=timezone.now(),
             message_id=msg_id,
-            thread_id=msg_id # Root message
+            thread_id=msg_id
         )
-        
+
         for rcpt in recipients_data:
             contact_id = rcpt.get('prospect_contact')
             contact = ProspectContact.objects.filter(id=contact_id).first() if contact_id else None
@@ -395,7 +392,7 @@ class OutreachEmailViewSet(viewsets.ModelViewSet):
                 prospect_contact=contact,
                 recipient_type=rcpt.get('recipient_type', 'TO').upper()
             )
-            
+
         for f in files:
             EmailAttachment.objects.create(
                 outreach_email=outreach_email,
@@ -404,11 +401,11 @@ class OutreachEmailViewSet(viewsets.ModelViewSet):
                 mime_type=f.content_type,
                 size=f.size
             )
-            
+
         # Create CommunicationActivity
         primary_contact_id = recipients_data[0].get('prospect_contact') if recipients_data else None
         primary_contact = ProspectContact.objects.filter(id=primary_contact_id).first() if primary_contact_id else None
-        
+
         CommunicationActivity.objects.create(
             prospect=prospect,
             prospect_contact=primary_contact,
@@ -419,11 +416,11 @@ class OutreachEmailViewSet(viewsets.ModelViewSet):
             outreach_email=outreach_email,
             performed_by=user
         )
-        
+
         # Update LeadQualification email status if it exists
         if hasattr(prospect, 'lead_qualification'):
             prospect.lead_qualification.email_status = 'Waiting for Response'
             prospect.lead_qualification.save()
-            
+
         serializer = self.get_serializer(outreach_email)
         return Response(serializer.data, status=status.HTTP_201_CREATED)

@@ -38,24 +38,24 @@ class ProspectSerializer(serializers.ModelSerializer):
     services = serializers.SerializerMethodField()
     solutions = serializers.SerializerMethodField()
     key_contacts = ProspectContactSerializer(many=True, required=False)
-    
+
     market_events = serializers.SerializerMethodField(read_only=True)
     market_event_ids = serializers.ListField(
         child=serializers.UUIDField(), write_only=True, required=False
     )
-    
+
     # Internal writes for nested relationships
     offerings_data = ProspectOfferingSerializer(many=True, write_only=True, required=False)
-    
+
     class Meta:
         model = Prospect
         fields = [
-            'id', 'company_name', 'country_head_office', 'complete_address', 
-            'official_phone_number', 'official_email_address', 'official_website_url', 
-            'linkedin_company_page', 'primary_industries', 'company_structure', 
-            'operational_status', 'parent_companies', 'parent_companies_detail', 'child_companies_detail', 'status_target', 
-            'primary_offering_type', 'products', 'services', 'solutions', 
-            'offerings_data', 'key_contacts', 'created_at', 'updated_at', 
+            'id', 'company_name', 'country_head_office', 'complete_address',
+            'official_phone_number', 'official_email_address', 'official_website_url',
+            'linkedin_company_page', 'primary_industries', 'company_structure',
+            'operational_status', 'parent_companies', 'parent_companies_detail', 'child_companies_detail', 'status_target',
+            'primary_offering_type', 'products', 'services', 'solutions',
+            'offerings_data', 'key_contacts', 'created_at', 'updated_at',
             'created_by', 'updated_by', 'market_events', 'market_event_ids'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'created_by', 'updated_by', 'market_events', 'market_event_ids']
@@ -75,31 +75,26 @@ class ProspectSerializer(serializers.ModelSerializer):
     def get_solutions(self, obj):
         offerings = obj.offerings.filter(offering_type=ProspectOffering.OfferingTypeChoice.SOLUTION)
         return ProspectOfferingSerializer(offerings, many=True).data
-    
+
     def validate(self, data):
         structure = data.get('company_structure')
         parent_companies = data.get('parent_companies', [])
         status = data.get('operational_status')
         status_target = data.get('status_target')
-        
-        # 1 & 2. Branch and Subsidiary require parent
+
+        # Branch and Subsidiary require parent
         if structure in [Prospect.Structure.BRANCH, Prospect.Structure.SUBSIDIARY]:
             if not parent_companies:
                 raise serializers.ValidationError({"parent_companies": "At least one parent company is required for Branch or Subsidiary."})
-        
-        # 3. Parent should not have parent company (optional strictness, let's just clear it or validate)
-        if structure == Prospect.Structure.PARENT and parent_companies:
-            pass # Usually OK to just allow or clear it. We will ignore or raise. We'll raise to be strict.
-            # raise serializers.ValidationError({"parent_companies": "Parent organization should not have parent companies."})
 
         # Acquired/Merged target validation
         if status in [Prospect.Status.ACQUIRED, Prospect.Status.MERGED]:
-            pass # Target is optional according to specs
+            pass  # Target is optional
 
-        # 4. Self-parent prevention (handled in views/save, but good here if instance exists)
+        # Self-parent prevention
         if self.instance and self.instance in parent_companies:
             raise serializers.ValidationError({"parent_companies": "A prospect cannot be its own parent."})
-            
+
         return data
 
     def create(self, validated_data):
@@ -107,74 +102,82 @@ class ProspectSerializer(serializers.ModelSerializer):
         contacts_data = validated_data.pop('key_contacts', [])
         parent_companies = validated_data.pop('parent_companies', [])
         market_event_ids = validated_data.pop('market_event_ids', [])
-        
+
         prospect = Prospect.objects.create(**validated_data)
-        
+
         from django.db import transaction
         from market_events.models import MarketEventParticipation
-        
+
         with transaction.atomic():
             if market_event_ids:
                 market_event_ids = list(set(market_event_ids))
                 for event_id in market_event_ids:
+                    from market_events.models import MarketEvent
+                    event = MarketEvent.objects.filter(id=event_id).first()
+                    if not event:
+                        raise serializers.ValidationError(f"MarketEvent {event_id} does not exist.")
                     MarketEventParticipation.objects.create(market_event_id=event_id, prospect=prospect)
-                    
+
         if parent_companies:
             prospect.parent_companies.set(parent_companies)
-            
+
         for offering in offerings_data:
             ProspectOffering.objects.create(prospect=prospect, **offering)
-            
+
         for contact in contacts_data:
             ProspectContact.objects.create(prospect=prospect, **contact)
-            
+
         return prospect
-        
+
     def update(self, instance, validated_data):
         offerings_data = validated_data.pop('offerings_data', None)
         contacts_data = validated_data.pop('key_contacts', None)
         parent_companies = validated_data.pop('parent_companies', None)
         market_event_ids = validated_data.pop('market_event_ids', None)
-        
+
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
-        
+
         from django.db import transaction
         from market_events.models import MarketEventParticipation
-        
+
         if market_event_ids is not None:
             with transaction.atomic():
                 market_event_ids = list(set(market_event_ids))
                 existing_participations = MarketEventParticipation.objects.filter(prospect=instance)
                 existing_event_ids = list(existing_participations.values_list('market_event_id', flat=True))
-                
+
                 # Delete removed ones
                 existing_participations.exclude(market_event_id__in=market_event_ids).delete()
-                
+
                 # Add new ones
                 for event_id in market_event_ids:
                     if event_id not in existing_event_ids:
+                        from market_events.models import MarketEvent
+                        event = MarketEvent.objects.filter(id=event_id).first()
+                        if not event:
+                            raise serializers.ValidationError(f"MarketEvent {event_id} does not exist.")
                         MarketEventParticipation.objects.create(market_event_id=event_id, prospect=instance)
 
         if parent_companies is not None:
             instance.parent_companies.set(parent_companies)
-            
+
         if offerings_data is not None:
             instance.offerings.all().delete()
             for offering in offerings_data:
                 ProspectOffering.objects.create(prospect=instance, **offering)
-                
+
         if contacts_data is not None:
             raw_contacts = self.initial_data.get('key_contacts', [])
             existing_contacts = {str(c.id): c for c in instance.key_contacts.all()}
             seen_ids = []
-            
+
             for i, contact_data in enumerate(contacts_data):
                 raw_id = None
                 if i < len(raw_contacts) and isinstance(raw_contacts[i], dict):
                     raw_id = str(raw_contacts[i].get('id', ''))
-                
+
                 if raw_id and raw_id in existing_contacts:
                     c_inst = existing_contacts[raw_id]
                     for k, v in contact_data.items():
@@ -184,18 +187,18 @@ class ProspectSerializer(serializers.ModelSerializer):
                 else:
                     new_c = ProspectContact.objects.create(prospect=instance, **contact_data)
                     seen_ids.append(str(new_c.id))
-            
+
             for c_id, c_inst in existing_contacts.items():
                 if c_id not in seen_ids:
                     c_inst.delete()
-                
+
         return instance
 
 from .models import LeadQualification
 
 class LeadQualificationSerializer(serializers.ModelSerializer):
     prospect = ProspectSerializer(read_only=True)
-    
+
     class Meta:
         model = LeadQualification
         fields = [
@@ -212,12 +215,12 @@ from .models import CallbackReminder
 
 class CallbackReminderSerializer(serializers.ModelSerializer):
     company_name = serializers.CharField(source='prospect.company_name', read_only=True)
-    
+
     class Meta:
         model = CallbackReminder
         fields = [
-            'id', 'prospect', 'company_name', 'scheduled_datetime', 
-            'description', 'is_completed', 'notified_30m', 
+            'id', 'prospect', 'company_name', 'scheduled_datetime',
+            'description', 'is_completed', 'notified_30m',
             'notified_15m', 'notified_5m', 'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
@@ -237,7 +240,7 @@ class OutreachEmailRecipientSerializer(serializers.ModelSerializer):
 class OutreachEmailSerializer(serializers.ModelSerializer):
     recipients = OutreachEmailRecipientSerializer(many=True, read_only=True)
     attachments = EmailAttachmentSerializer(many=True, read_only=True)
-    
+
     class Meta:
         model = OutreachEmail
         fields = [
@@ -249,7 +252,7 @@ class OutreachEmailSerializer(serializers.ModelSerializer):
 
 class CallActivitySerializer(serializers.ModelSerializer):
     created_by_name = serializers.SerializerMethodField()
-    
+
     def get_created_by_name(self, obj):
         if obj.created_by:
             return obj.created_by.get_full_name() or obj.created_by.username

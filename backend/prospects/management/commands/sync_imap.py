@@ -99,6 +99,7 @@ class Command(BaseCommand):
                         
                         # Create inbound CommunicationActivity
                         CommunicationActivity.objects.create(
+                            
                             prospect=matched_email.prospect,
                             prospect_contact=contact,
                             activity_type='EMAIL_RECEIVED',

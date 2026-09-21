@@ -24,6 +24,7 @@ INSTALLED_APPS = [
     'corsheaders',
     'django_filters',
     'accounts',
+    'companies',
     'prospects',
     'market_events',
 ]

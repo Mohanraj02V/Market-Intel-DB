@@ -45,19 +45,30 @@ class IsLQ(BasePermission):
     def has_permission(self, request, view):
         return bool(request.user and request.user.is_authenticated and hasattr(request.user, 'profile') and request.user.profile.role == 'LQ')
 
-class MailAccountViewSet(viewsets.ReadOnlyModelViewSet):
+class MailAccountViewSet(viewsets.ModelViewSet):
     serializer_class = MailAccountSerializer
     permission_classes = [IsLQ]
 
     def get_queryset(self):
-        return MailAccount.objects.filter(assigned_users__user=self.request.user)
-        
-    @action(detail=False, methods=['post'], url_path='test-smtp')
-    def test_smtp(self, request):
-        mail_account = self.get_queryset().first()
-        if not mail_account:
-            return Response({'error': 'No mail account configured.'}, status=status.HTTP_400_BAD_REQUEST)
-        
+        return MailAccount.objects.all()
+
+    def perform_create(self, serializer):
+        mail_account = serializer.save()
+        profile = self.request.user.profile
+        profile.mail_account = mail_account
+        profile.save()
+
+    @action(detail=True, methods=['post'], url_path='set-default')
+    def set_default(self, request, pk=None):
+        mail_account = self.get_object()
+        profile = request.user.profile
+        profile.mail_account = mail_account
+        profile.save()
+        return Response({'status': 'default set'})
+
+    @action(detail=True, methods=['post'], url_path='test-smtp')
+    def test_smtp(self, request, pk=None):
+        mail_account = self.get_object()
         try:
             password = encryption.decrypt_password(mail_account.smtp_app_password_encrypted)
             if mail_account.smtp_security == 'SSL':
@@ -65,7 +76,6 @@ class MailAccountViewSet(viewsets.ReadOnlyModelViewSet):
             else:
                 server = smtplib.SMTP(mail_account.smtp_host, mail_account.smtp_port)
                 server.starttls()
-                
             server.login(mail_account.smtp_username, password)
             server.quit()
             mail_account.smtp_status = 'VERIFIED'
@@ -76,12 +86,9 @@ class MailAccountViewSet(viewsets.ReadOnlyModelViewSet):
             mail_account.save()
             return Response({'error': 'Unable to connect to SMTP server. Please verify the configuration.'}, status=status.HTTP_400_BAD_REQUEST)
 
-    @action(detail=False, methods=['post'], url_path='test-imap')
-    def test_imap(self, request):
-        mail_account = self.get_queryset().first()
-        if not mail_account:
-            return Response({'error': 'No mail account configured.'}, status=status.HTTP_400_BAD_REQUEST)
-        
+    @action(detail=True, methods=['post'], url_path='test-imap')
+    def test_imap(self, request, pk=None):
+        mail_account = self.get_object()
         try:
             password = encryption.decrypt_password(mail_account.imap_app_password_encrypted)
             if mail_account.imap_security == 'SSL':
@@ -89,7 +96,6 @@ class MailAccountViewSet(viewsets.ReadOnlyModelViewSet):
             else:
                 server = imaplib.IMAP4(mail_account.imap_host, mail_account.imap_port)
                 server.starttls()
-                
             server.login(mail_account.imap_username, password)
             server.logout()
             mail_account.imap_status = 'CONNECTED'

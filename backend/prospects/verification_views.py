@@ -10,7 +10,7 @@ from accounts.permissions import IsLQ, IsPREOrLQ
 class EmailVerificationViewSet(viewsets.ModelViewSet):
     queryset = EmailVerification.objects.all()
     serializer_class = EmailVerificationSerializer
-    permission_classes = [IsPREOrLQ] # PRE can view, LQ can verify/confirm
+    permission_classes = [IsPREOrLQ]
 
     @action(detail=False, methods=['post'], permission_classes=[IsLQ])
     def verify(self, request):
@@ -32,7 +32,7 @@ class EmailVerificationViewSet(viewsets.ModelViewSet):
                 prospect_contact = ProspectContact.objects.get(id=prospect_contact_id, prospect=prospect)
             except ProspectContact.DoesNotExist:
                 return Response({'error': 'ProspectContact not found or does not belong to Prospect.'}, status=status.HTTP_404_NOT_FOUND)
-            
+
             if prospect_contact.official_email != email_address:
                 return Response({'error': 'Email address does not match current contact email.'}, status=status.HTTP_400_BAD_REQUEST)
         else:
@@ -60,7 +60,6 @@ class EmailVerificationViewSet(viewsets.ModelViewSet):
                 'reason': engine_result['reason'],
                 'verified_at': timezone.now(),
                 'verified_by': request.user,
-                # Reset confirmation when reverifying
                 'confirmed_by_lq': None,
                 'confirmed_at': None
             }
@@ -78,7 +77,7 @@ class EmailVerificationViewSet(viewsets.ModelViewSet):
                     lq.issue_reported_at = timezone.now()
                     lq.save()
             except LeadQualification.DoesNotExist:
-                pass # Should not happen
+                pass
 
         serializer = self.get_serializer(verification)
         return Response(serializer.data, status=status.HTTP_200_OK)
@@ -98,7 +97,7 @@ class EmailVerificationViewSet(viewsets.ModelViewSet):
         verification.confirmed_by_lq = request.user
         verification.confirmed_at = timezone.now()
         verification.save()
-        
+
         # Clear PRE task if it was resolved
         try:
             lq = verification.prospect.lead_qualification

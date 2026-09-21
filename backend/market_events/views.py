@@ -31,6 +31,9 @@ class MarketEventViewSet(viewsets.ModelViewSet):
             
         return queryset
 
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user.username)
+
     def perform_destroy(self, instance):
         # Constraints ensure cascade delete handles participation records safely
         instance.delete()

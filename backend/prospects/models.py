@@ -28,22 +28,21 @@ class Prospect(models.Model):
     company_name = models.CharField(max_length=255)
     country_head_office = models.CharField(max_length=255)
     complete_address = models.TextField()
-    
+
     official_phone_number = models.CharField(max_length=255, blank=True, null=True)
     official_email_address = models.EmailField(blank=True, null=True)
     official_website_url = models.URLField(blank=True, null=True)
     linkedin_company_page = models.URLField(blank=True, null=True)
-    
+
     primary_industries = models.CharField(max_length=255)
 
     company_structure = models.CharField(max_length=50, choices=Structure.choices)
     operational_status = models.CharField(max_length=50, choices=Status.choices)
-    
+
     parent_companies = models.ManyToManyField('self', symmetrical=False, blank=True, related_name='child_companies')
     status_target = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, blank=True, related_name='acquired_or_merged_from')
-    
-    primary_offering_type = models.CharField(max_length=50, choices=OfferingType.choices)
 
+    primary_offering_type = models.CharField(max_length=50, choices=OfferingType.choices)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -106,20 +105,18 @@ class LeadQualification(models.Model):
         PRE_UPDATED = 'PRE_UPDATED', 'PRE Updated Data'
 
     prospect = models.OneToOneField(Prospect, on_delete=models.CASCADE, related_name='lead_qualification')
-    
+
     verification_status = models.CharField(max_length=50, choices=VerificationStatus.choices, default=VerificationStatus.UNVERIFIED)
     qualification_status = models.CharField(max_length=50, choices=QualificationStatus.choices, default=QualificationStatus.UNQUALIFIED)
     pre_task_status = models.CharField(max_length=50, choices=PreTaskStatus.choices, default=PreTaskStatus.NONE)
     verification_checklist = models.JSONField(default=dict, blank=True)
     email_status = models.CharField(max_length=50, default='Not Sent', blank=True, null=True)
-    
+
     qualification_score = models.IntegerField(default=0)
     lq_notes = models.TextField(blank=True, null=True)
-    
+
     qualified_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='qualifications_performed')
     qualified_at = models.DateTimeField(null=True, blank=True)
-    
-    # BANT Criteria
 
     # Issue Reporting
     issue_category = models.CharField(max_length=255, blank=True, null=True)
@@ -131,7 +128,6 @@ class LeadQualification(models.Model):
     authority = models.BooleanField(default=False)
     need = models.BooleanField(default=False)
     timeline = models.BooleanField(default=False)
-
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -159,12 +155,11 @@ class CallbackReminder(models.Model):
     scheduled_datetime = models.DateTimeField()
     description = models.TextField(blank=True, null=True)
     is_completed = models.BooleanField(default=False)
-    
-    # Tracking notification states
+
     notified_30m = models.BooleanField(default=False)
     notified_15m = models.BooleanField(default=False)
     notified_5m = models.BooleanField(default=False)
-    
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -266,7 +261,7 @@ class EmailVerification(models.Model):
 
     verified_at = models.DateTimeField(null=True, blank=True)
     verified_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='verifications_performed')
-    
+
     confirmed_by_lq = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='verifications_confirmed')
     confirmed_at = models.DateTimeField(null=True, blank=True)
 

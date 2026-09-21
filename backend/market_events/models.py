@@ -9,7 +9,7 @@ class MarketEvent(models.Model):
     host_country = models.CharField(max_length=255)
     start_date = models.DateField(default=datetime.date.today)
     end_date = models.DateField(default=datetime.date.today)
-    
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     created_by = models.CharField(max_length=255, blank=True, null=True)
@@ -22,13 +22,13 @@ class MarketEvent(models.Model):
 class MarketEventParticipation(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     market_event = models.ForeignKey(
-        MarketEvent, 
-        related_name='participations', 
+        MarketEvent,
+        related_name='participations',
         on_delete=models.CASCADE
     )
     prospect = models.ForeignKey(
-        'prospects.Prospect', 
-        related_name='market_event_participations', 
+        'prospects.Prospect',
+        related_name='market_event_participations',
         on_delete=models.CASCADE
     )
     created_at = models.DateTimeField(auto_now_add=True)

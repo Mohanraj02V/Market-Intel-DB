@@ -1,15 +1,19 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import api from '../../services/api';
 
-export const fetchMailAccount = createAsyncThunk('outreach/fetchMailAccount', async (_, { rejectWithValue }) => {
+export const fetchMailAccounts = createAsyncThunk('outreach/fetchMailAccounts', async (_, { rejectWithValue }) => {
     try {
         const response = await api.get('/mail-account/');
-        if (response.data.results && response.data.results.length > 0) {
-            return response.data.results[0];
-        } else if (response.data.length > 0) {
-            return response.data[0];
-        }
-        return null;
+        return response.data.results || response.data || [];
+    } catch (error) {
+        return rejectWithValue(error.response.data);
+    }
+});
+
+export const setDefaultAccount = createAsyncThunk('outreach/setDefaultAccount', async (id, { rejectWithValue }) => {
+    try {
+        const response = await api.post(`/mail-account/${id}/set-default/`);
+        return { id, ...response.data };
     } catch (error) {
         return rejectWithValue(error.response.data);
     }
@@ -29,18 +33,18 @@ export const saveMailAccount = createAsyncThunk('outreach/saveMailAccount', asyn
     }
 });
 
-export const testSmtp = createAsyncThunk('outreach/testSmtp', async (_, { rejectWithValue }) => {
+export const testSmtp = createAsyncThunk('outreach/testSmtp', async (id, { rejectWithValue }) => {
     try {
-        const response = await api.post('/mail-account/test-smtp/');
+        const response = await api.post(`/mail-account/${id}/test-smtp/`);
         return response.data;
     } catch (error) {
         return rejectWithValue(error.response?.data || { error: 'Unknown Error' });
     }
 });
 
-export const testImap = createAsyncThunk('outreach/testImap', async (_, { rejectWithValue }) => {
+export const testImap = createAsyncThunk('outreach/testImap', async (id, { rejectWithValue }) => {
     try {
-        const response = await api.post('/mail-account/test-imap/');
+        const response = await api.post(`/mail-account/${id}/test-imap/`);
         return response.data;
     } catch (error) {
         return rejectWithValue(error.response?.data || { error: 'Unknown Error' });
@@ -92,7 +96,7 @@ export const syncImap = createAsyncThunk('outreach/syncImap', async (_, { reject
 const outreachSlice = createSlice({
     name: 'outreach',
     initialState: {
-        mailAccount: null,
+        mailAccounts: [],
         communications: [],
         status: 'idle', // idle, loading, succeeded, failed
         error: null,
@@ -104,17 +108,22 @@ const outreachSlice = createSlice({
     },
     extraReducers: (builder) => {
         builder
-            .addCase(fetchMailAccount.pending, (state) => { state.status = 'loading'; })
-            .addCase(fetchMailAccount.fulfilled, (state, action) => {
+            .addCase(fetchMailAccounts.pending, (state) => { state.status = 'loading'; })
+            .addCase(fetchMailAccounts.fulfilled, (state, action) => {
                 state.status = 'succeeded';
-                state.mailAccount = action.payload;
+                state.mailAccounts = action.payload;
             })
-            .addCase(fetchMailAccount.rejected, (state, action) => {
+            .addCase(fetchMailAccounts.rejected, (state, action) => {
                 state.status = 'failed';
                 state.error = action.payload;
             })
             .addCase(saveMailAccount.fulfilled, (state, action) => {
-                state.mailAccount = action.payload;
+                const index = state.mailAccounts.findIndex(a => a.id === action.payload.id);
+                if (index !== -1) {
+                    state.mailAccounts[index] = action.payload;
+                } else {
+                    state.mailAccounts.push(action.payload);
+                }
             })
             .addCase(fetchCommunications.fulfilled, (state, action) => {
                 state.communications = action.payload;
