@@ -8,6 +8,35 @@ from rest_framework.permissions import IsAuthenticated
 from .models import Prospect, ProspectOffering, ProspectContact, LeadQualification, EmailVerification
 from .serializers import ProspectSerializer, LeadQualificationSerializer, ProspectContactSerializer
 
+def apply_lq_distribution_filter(queryset, user, prospect_field_prefix=''):
+    """
+    Applies the sequential batch distribution logic for LQ users.
+    Distributes prospects in batches of 5 based on creation order.
+    """
+    if user.is_superuser or not hasattr(user, 'profile') or user.profile.role != 'LQ':
+        return queryset
+        
+    from django.contrib.auth import get_user_model
+    from django.db.models.expressions import RawSQL
+    User = get_user_model()
+    
+    # Only include non-superusers in the distribution pool
+    lq_users = list(User.objects.filter(profile__role='LQ', is_superuser=False).order_by('id').values_list('id', flat=True))
+    
+    if user.id in lq_users:
+        N = len(lq_users)
+        current_index = lq_users.index(user.id)
+        query = f"""
+            SELECT id FROM (
+                SELECT id, ROW_NUMBER() OVER (ORDER BY created_at ASC, id ASC) - 1 as row_num
+                FROM prospects_prospect
+            ) as subquery
+            WHERE MOD(CAST(FLOOR(row_num / 5) AS INTEGER), {N}) = {current_index}
+        """
+        filter_kwargs = {f"{prospect_field_prefix}in": RawSQL(query, [])}
+        return queryset.filter(**filter_kwargs)
+    return queryset.none()
+
 class ProspectViewSet(viewsets.ModelViewSet):
     serializer_class = ProspectSerializer
     permission_classes = [IsPRE]
@@ -28,10 +57,13 @@ class ProspectViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         queryset = Prospect.objects.all().order_by('-updated_at')
         
-        # Role-based filtering for PRE
+        # Role-based filtering
         user = self.request.user
-        if not user.is_superuser and hasattr(user, 'profile') and user.profile.role == 'PRE':
-            queryset = queryset.filter(created_by=user.username)
+        if not user.is_superuser and hasattr(user, 'profile'):
+            if user.profile.role == 'PRE':
+                queryset = queryset.filter(created_by=user.username)
+            elif user.profile.role == 'LQ':
+                queryset = apply_lq_distribution_filter(queryset, user, 'id__')
             
         market_event = self.request.query_params.get('market_event')
         if market_event:
@@ -95,8 +127,11 @@ class LQPipelineViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         queryset = LeadQualification.objects.all().select_related('prospect').order_by('-updated_at')
         user = self.request.user
-        if not user.is_superuser and hasattr(user, 'profile') and user.profile.role == 'PRE':
-            queryset = queryset.filter(prospect__created_by=user.username)
+        if not user.is_superuser and hasattr(user, 'profile'):
+            if user.profile.role == 'PRE':
+                queryset = queryset.filter(prospect__created_by=user.username)
+            elif user.profile.role == 'LQ':
+                queryset = apply_lq_distribution_filter(queryset, user, 'prospect_id__')
         return queryset
 
 
@@ -226,7 +261,11 @@ class CallbackReminderViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        return CallbackReminder.objects.filter(is_completed=False).order_by('scheduled_datetime')
+        queryset = CallbackReminder.objects.filter(is_completed=False).order_by('scheduled_datetime')
+        user = self.request.user
+        if not user.is_superuser and hasattr(user, 'profile') and user.profile.role == 'LQ':
+            queryset = apply_lq_distribution_filter(queryset, user, 'prospect_id__')
+        return queryset
 
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user.username)
@@ -256,8 +295,11 @@ class ProspectContactViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         queryset = ProspectContact.objects.all().select_related('prospect').order_by('-created_at')
         user = self.request.user
-        if not user.is_superuser and hasattr(user, 'profile') and user.profile.role == 'PRE':
-            queryset = queryset.filter(prospect__created_by=user.username)
+        if not user.is_superuser and hasattr(user, 'profile'):
+            if user.profile.role == 'PRE':
+                queryset = queryset.filter(prospect__created_by=user.username)
+            elif user.profile.role == 'LQ':
+                queryset = apply_lq_distribution_filter(queryset, user, 'prospect_id__')
         return queryset
 
     def perform_create(self, serializer):
@@ -289,6 +331,11 @@ class CommunicationActivityViewSet(viewsets.ReadOnlyModelViewSet):
             queryset = queryset.filter(prospect_id=prospect_id)
         if contact_id:
             queryset = queryset.filter(prospect_contact_id=contact_id)
+            
+        user = self.request.user
+        if not user.is_superuser and hasattr(user, 'profile') and user.profile.role == 'LQ':
+            queryset = apply_lq_distribution_filter(queryset, user, 'prospect_id__')
+            
         return queryset
 
 class CallActivityViewSet(viewsets.ModelViewSet):
@@ -303,6 +350,11 @@ class CallActivityViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(prospect_id=prospect_id)
         if contact_id:
             queryset = queryset.filter(prospect_contact_id=contact_id)
+            
+        user = self.request.user
+        if not user.is_superuser and hasattr(user, 'profile') and user.profile.role == 'LQ':
+            queryset = apply_lq_distribution_filter(queryset, user, 'prospect_id__')
+            
         return queryset
 
     def perform_create(self, serializer):
@@ -347,6 +399,11 @@ class OutreachEmailViewSet(viewsets.ModelViewSet):
         prospect_id = self.request.query_params.get('prospect')
         if prospect_id:
             queryset = queryset.filter(prospect_id=prospect_id)
+            
+        user = self.request.user
+        if not user.is_superuser and hasattr(user, 'profile') and user.profile.role == 'LQ':
+            queryset = apply_lq_distribution_filter(queryset, user, 'prospect_id__')
+            
         return queryset
 
     def create(self, request, *args, **kwargs):

@@ -1,0 +1,1133 @@
+string Import_Books_Bills()
+{
+	organization_id = "60036200869";
+	date_start = "2026-08-03";
+	date_end = "2026-08-03";
+
+	created_count = 0;
+	skipped_count = 0;
+
+	page_no = 1;
+	has_more_page = true;
+
+	page_list = {1,2,3,4,5,6,7,8,9,10};
+
+	for each page_counter in page_list
+	{
+		if(has_more_page == false)
+		{
+			break;
+		}
+
+		info "";
+		info "--------";
+		info "PROCESSING BILLS PAGE : " + page_no;
+		info "--------";
+
+		params = Map();
+		params.put("organization_id",organization_id);
+		params.put("date_start",date_start);
+		params.put("date_end",date_end);
+		params.put("page",page_no);
+		params.put("per_page",200);
+
+		books_response = invokeurl
+		[
+			url :"https://www.zohoapis.in/books/v3/bills"
+			type :GET
+			parameters:params
+			connection:"zoho_books_connection"
+		];
+
+		info "ZOHO BOOKS BILLS RESPONSE";
+		info books_response;
+
+		if(books_response.get("code") != 0)
+		{
+			return "Error fetching Bills from Zoho Books: " + books_response.toString();
+		}
+
+		bills_list = books_response.get("bills");
+
+		if(bills_list == null || bills_list.size() == 0)
+		{
+			info "NO MORE BILLS FOUND";
+			has_more_page = false;
+			break;
+		}
+
+		page_context = books_response.get("page_context");
+
+		if(page_context != null)
+		{
+			if(page_context.get("has_more_page") == true)
+			{
+				has_more_page = true;
+			}
+			else
+			{
+				has_more_page = false;
+			}
+		}
+		else
+		{
+			has_more_page = false;
+		}
+
+		for each bill_summary in bills_list
+		{
+			bill_id = "";
+			bill_number = "";
+
+			if(bill_summary.get("bill_id") != null)
+			{
+				bill_id = bill_summary.get("bill_id").toString();
+			}
+
+			if(bill_summary.get("bill_number") != null)
+			{
+				bill_number = bill_summary.get("bill_number").toString();
+			}
+
+			info "";
+			info "--------";
+			info "PROCESSING BILL: " + bill_number;
+			info "Books Bill ID: " + bill_id;
+			info "--------";
+
+			existing_bill = Bills[Books_Bill_ID == bill_id];
+
+			if(existing_bill.count() == 0)
+			{
+				if(bill_number != "")
+				{
+					existing_bill = Bills[Bill_Number == bill_number];
+				}
+			}
+
+			if(existing_bill.count() > 0)
+			{
+				info "Bill already exists in Creator.";
+				info "Skipping: " + bill_number;
+
+				for each existing_rec in existing_bill
+				{
+					info "  EXISTING RECORD:";
+					info "  Record ID: " + existing_rec.ID;
+					info "  Bill_Number: " + existing_rec.Bill_Number;
+					info "  Invoice_Number: " + existing_rec.Invoice_Number;
+					info "  Bill_Date: " + existing_rec.Bill_Date;
+					info "  Vendor_Name: " + existing_rec.Vendor_Name;
+					info "  Books_Bill_ID: " + existing_rec.Books_Bill_ID;
+					info "  Total_Amount: " + existing_rec.Total_Amount;
+					break;
+				}
+
+				skipped_count = skipped_count + 1;
+				continue;
+			}
+
+			detail_params = Map();
+			detail_params.put("organization_id",organization_id);
+
+			detail_response = invokeurl
+			[
+				url :"https://www.zohoapis.in/books/v3/bills/" + bill_id
+				type :GET
+				parameters:detail_params
+				connection:"zoho_books_connection"
+			];
+
+			info "BILL DETAIL RESPONSE";
+			info detail_response;
+
+			if(detail_response.get("code") != 0)
+			{
+				info "Could not fetch details for " + bill_number;
+				skipped_count = skipped_count + 1;
+				continue;
+			}
+
+			bill = detail_response.get("bill");
+
+			if(bill == null)
+			{
+				info "Bill details are empty.";
+				skipped_count = skipped_count + 1;
+				continue;
+			}
+
+			vendor_name = "";
+			vendor_id = "";
+			reference_number = "";
+
+			if(bill.get("vendor_name") != null)
+			{
+				vendor_name = bill.get("vendor_name").toString();
+			}
+
+			if(bill.get("vendor_id") != null)
+			{
+				vendor_id = bill.get("vendor_id").toString();
+			}
+
+			if(bill.get("reference_number") != null)
+			{
+				reference_number = bill.get("reference_number").toString();
+			}
+
+			if(bill.get("bill_number") != null)
+			{
+				bill_number = bill.get("bill_number").toString();
+			}
+
+			bill_date = null;
+
+			if(bill.get("date") != null)
+			{
+				if(bill.get("date").toString() != "")
+				{
+					bill_date = bill.get("date").toString().toDate("yyyy-MM-dd");
+				}
+			}
+
+			due_date = null;
+
+			if(bill.get("due_date") != null)
+			{
+				if(bill.get("due_date").toString() != "")
+				{
+					due_date = bill.get("due_date").toString().toDate("yyyy-MM-dd");
+				}
+			}
+
+			// ========================================================
+			// INVOICE FIELDS (mandatory on the Bills form)
+			//
+			// Zoho Books has no literal "invoice received date", so
+			// we use the bill's created_time in Books as a sensible
+			// stand-in, falling back to the bill date if that is
+			// ever missing.
+			// ========================================================
+			invoice_number_value = bill_number;
+			invoice_date_value = null;
+			invoice_received_date_value = null;
+
+			if(bill.get("date") != null)
+			{
+				if(bill.get("date").toString() != "")
+				{
+					invoice_date_value = bill.get("date").toString().toDate("yyyy-MM-dd");
+				}
+			}
+
+			if(bill.get("created_time") != null)
+			{
+				created_time_str = bill.get("created_time").toString();
+
+				if(created_time_str != "")
+				{
+					if(created_time_str.length() >= 10)
+					{
+						invoice_received_date_value = created_time_str.subString(0,10).toDate("yyyy-MM-dd");
+					}
+				}
+			}
+
+			if(invoice_received_date_value == null)
+			{
+				invoice_received_date_value = invoice_date_value;
+			}
+
+			payment_terms = 0;
+			payment_terms_label = "";
+
+			if(bill.get("payment_terms") != null)
+			{
+				payment_terms = bill.get("payment_terms");
+			}
+
+			if(bill.get("payment_terms_label") != null)
+			{
+				payment_terms_label = bill.get("payment_terms_label").toString();
+			}
+
+			// ========================================================
+			// CURRENCY
+			//
+			// Add_Currency.Currency_Name choices look like
+			// "INR- Indian Rupee". Zoho Books only gives the bare
+			// code (e.g. "INR"), so match any choice that starts
+			// with "<code>-".
+			// ========================================================
+			currency_code = "";
+			currency_name_formatted = "";
+
+			if(bill.get("currency_code") != null)
+			{
+				currency_code = bill.get("currency_code").toString();
+			}
+
+			if(bill.get("currency_name_formatted") != null)
+			{
+				currency_name_formatted = bill.get("currency_name_formatted").toString();
+			}
+
+			gst_treatment = "";
+			gst_no = "";
+			source_of_supply = "";
+			destination_of_supply = "";
+			is_reverse_charge = false;
+
+			if(bill.get("gst_treatment") != null)
+			{
+				gst_treatment = bill.get("gst_treatment").toString();
+			}
+
+			if(bill.get("gst_no") != null)
+			{
+				gst_no = bill.get("gst_no").toString();
+			}
+
+			if(bill.get("source_of_supply") != null)
+			{
+				source_of_supply = bill.get("source_of_supply").toString();
+			}
+
+			if(bill.get("destination_of_supply") != null)
+			{
+				destination_of_supply = bill.get("destination_of_supply").toString();
+			}
+
+			if(bill.get("is_reverse_charge_applied") != null)
+			{
+				is_reverse_charge = bill.get("is_reverse_charge_applied");
+			}
+
+			tds_amount = 0;
+
+			if(bill.get("tds_amount") != null)
+			{
+				tds_amount = bill.get("tds_amount");
+			}
+
+			sub_total = 0;
+			total_tax_amount = 0;
+			total_amount = 0;
+
+			if(bill.get("sub_total") != null)
+			{
+				sub_total = bill.get("sub_total");
+			}
+
+			if(bill.get("tax_total") != null)
+			{
+				total_tax_amount = bill.get("tax_total");
+			}
+
+			if(bill.get("total") != null)
+			{
+				total_amount = bill.get("total");
+			}
+
+			notes_value = "";
+
+			if(bill.get("notes") != null)
+			{
+				notes_value = bill.get("notes").toString();
+			}
+
+			lock_status = "";
+
+			if(bill.get("status") != null)
+			{
+				lock_status = bill.get("status").toString();
+			}
+
+			vendor_credit_status = "";
+			vendor_credits = bill.get("vendor_credits");
+
+			if(vendor_credits != null)
+			{
+				if(vendor_credits.size() > 0)
+				{
+					vendor_credit_status = "Applied";
+				}
+				else
+				{
+					vendor_credit_status = "Not Applied";
+				}
+			}
+
+			order_number = "";
+			purchaseorders = bill.get("purchaseorders");
+
+			if(purchaseorders != null)
+			{
+				if(purchaseorders.size() > 0)
+				{
+					first_po = purchaseorders.get(0);
+
+					if(first_po.get("purchaseorder_number") != null)
+					{
+						order_number = first_po.get("purchaseorder_number").toString();
+					}
+				}
+			}
+
+			creator_bill_no = "";
+			creator_bill_date = null;
+			bill_custom_fields = bill.get("custom_fields");
+
+			if(bill_custom_fields != null)
+			{
+				for each cf in bill_custom_fields
+				{
+					cf_api_name = "";
+					cf_value = null;
+
+					if(cf.get("api_name") != null)
+					{
+						cf_api_name = cf.get("api_name").toString();
+					}
+
+					if(cf.get("value") != null)
+					{
+						cf_value = cf.get("value");
+					}
+
+					if(cf_api_name == "cf_creator_bill_no")
+					{
+						if(cf_value != null)
+						{
+							creator_bill_no = cf_value.toString();
+						}
+					}
+
+					if(cf_api_name == "cf_creator_bill_date")
+					{
+						if(cf_value != null)
+						{
+							if(cf_value.toString() != "")
+							{
+								creator_bill_date = cf_value.toString().toDate("yyyy-MM-dd");
+							}
+						}
+					}
+				}
+			}
+
+			// ========================================================
+			// VENDOR LOOKUP
+			// ========================================================
+			vendor_lookup_id = null;
+
+			if(vendor_id != "")
+			{
+				vendor_search = Add_Vendor[Books_Vendor_ID == vendor_id];
+
+				if(vendor_search.count() > 0)
+				{
+					for each ven in vendor_search
+					{
+						vendor_lookup_id = ven.ID;
+						break;
+					}
+				}
+			}
+
+			if(vendor_lookup_id == null)
+			{
+				if(vendor_name != "")
+				{
+					vendor_search2 = Add_Vendor[Vendor_Name1 == vendor_name];
+
+					if(vendor_search2.count() > 0)
+					{
+						for each ven2 in vendor_search2
+						{
+							vendor_lookup_id = ven2.ID;
+							break;
+						}
+					}
+				}
+			}
+
+			if(vendor_lookup_id == null)
+			{
+				info "SKIPPING BILL - Vendor not found";
+				info "Vendor Name: " + vendor_name;
+				info "Vendor ID: " + vendor_id;
+				skipped_count = skipped_count + 1;
+				continue;
+			}
+
+			// ========================================================
+			// CURRENCY LOOKUP
+			// ========================================================
+			currency_lookup_id = null;
+
+			if(currency_code != "")
+			{
+				currency_search = Add_Currency[Currency_Name.startsWith(currency_code + "-")];
+
+				if(currency_search.count() > 0)
+				{
+					for each cur in currency_search
+					{
+						currency_lookup_id = cur.ID;
+						break;
+					}
+				}
+			}
+
+			info "Currency Code: " + currency_code;
+			info "Currency Lookup ID: " + currency_lookup_id;
+
+			// ========================================================
+			// SOURCE / DESTINATION OF SUPPLY LOOKUP
+			//
+			// Bills.Source_of_Supply and Bills.Destination_of_Supply
+			// are Lookup fields pointing to the Add_State_Code report,
+			// NOT plain text fields. Zoho Books only returns the bare
+			// state code (e.g. "TS"), so we must resolve that code to
+			// the matching Add_State_Code record's ID before assigning
+			// it, otherwise Creator throws "invalid expression".
+			// ========================================================
+			source_of_supply_lookup_id = null;
+
+			if(source_of_supply != "")
+			{
+				source_state_search = Add_State_Code[State_Code == source_of_supply];
+
+				if(source_state_search.count() > 0)
+				{
+					for each src_state in source_state_search
+					{
+						source_of_supply_lookup_id = src_state.ID;
+						break;
+					}
+				}
+			}
+
+			destination_of_supply_lookup_id = null;
+
+			if(destination_of_supply != "")
+			{
+				dest_state_search = Add_State_Code[State_Code == destination_of_supply];
+
+				if(dest_state_search.count() > 0)
+				{
+					for each dest_state in dest_state_search
+					{
+						destination_of_supply_lookup_id = dest_state.ID;
+						break;
+					}
+				}
+			}
+
+			info "Source of Supply Code: " + source_of_supply;
+			info "Source of Supply Lookup ID: " + source_of_supply_lookup_id;
+			info "Destination of Supply Code: " + destination_of_supply;
+			info "Destination of Supply Lookup ID: " + destination_of_supply_lookup_id;
+
+			// ========================================================
+			// PAYMENT TERMS LOOKUP
+			//
+			// Matching purely by Payment_Terms_No never found a hit for
+			// either bill tested (Books sent 85/"Due on Receipt" and
+			// 8/"Custom", neither matched a No in Add_Payment_Terms).
+			// The label is the more reliable signal across orgs, so try
+			// an exact Payment_Terms_Name match first, and only fall
+			// back to the numeric code if that fails.
+			// ========================================================
+			payment_terms_lookup_id = null;
+
+			if(payment_terms_label != "")
+			{
+				payment_terms_search_by_name = Add_Payment_Terms[Payment_Terms_Name == payment_terms_label];
+
+				if(payment_terms_search_by_name.count() > 0)
+				{
+					for each ptn in payment_terms_search_by_name
+					{
+						payment_terms_lookup_id = ptn.ID;
+						break;
+					}
+				}
+			}
+
+			if(payment_terms_lookup_id == null)
+			{
+				payment_terms_search = Add_Payment_Terms[Payment_Terms_No == payment_terms];
+
+				if(payment_terms_search.count() > 0)
+				{
+					for each pt in payment_terms_search
+					{
+						payment_terms_lookup_id = pt.ID;
+						break;
+					}
+				}
+			}
+
+			info "Payment Terms Label: " + payment_terms_label;
+			info "Payment Terms No: " + payment_terms;
+			info "Payment Terms Lookup ID: " + payment_terms_lookup_id;
+
+			// ========================================================
+			// ENTITY LOOKUP
+			//
+			// Bills.Entity is a Lookup field pointing to Entity_Master,
+			// which stores each entity's Zoho Books Organization ID.
+			// We already have organization_id from the Books API call
+			// at the top of this function, so resolve the matching
+			// Entity_Master record by that field.
+			//
+			// NOTE: confirm the field link name on Entity_Master is
+			// exactly "Organization_ID" (Image 8 shows the label
+			// "Organization ID" — adjust below if the link name differs,
+			// e.g. Organization_Id or Org_ID).
+			// ========================================================
+			entity_lookup_id = null;
+
+			if(organization_id != "")
+			{
+				entity_search = Entity_Master[Organization_ID == organization_id];
+
+				if(entity_search.count() > 0)
+				{
+					for each ent in entity_search
+					{
+						entity_lookup_id = ent.ID;
+						break;
+					}
+				}
+			}
+
+			info "Organization ID: " + organization_id;
+			info "Entity Lookup ID: " + entity_lookup_id;
+
+			// ========================================================
+			// ENTITY BRANCH LOOKUP
+			//
+			// Bills.Entity_Branch is a Lookup field pointing to
+			// Add_Entity_Branch, which has a Location_ID field. Zoho
+			// Books' bill payload includes a matching "location_id"
+			// (e.g. "2307007000000184793" for Head Office), so resolve
+			// the branch by that.
+			//
+			// NOTE: Comparing a Lookup field (Entity) directly inside a
+			// criteria bracket [ ... ] triggers a strict compile-time
+			// type check in Deluge ("NUMBER vs TEXT") regardless of
+			// which side entity_lookup_id is on. So we only filter by
+			// Location_ID in the bracket (both sides text — no issue),
+			// then do the Entity match as a normal runtime comparison
+			// in the loop below, which isn't subject to that check.
+			// ========================================================
+			books_location_id = "";
+
+			if(bill.get("location_id") != null)
+			{
+				books_location_id = bill.get("location_id").toString();
+			}
+
+			// Location_ID on Add_Entity_Branch is a Number field, but
+			// books_location_id is text (Books' JSON returns it quoted).
+			// Convert before comparing, and guard against a conversion
+			// failure if it's ever non-numeric.
+			books_location_id_num = null;
+
+			if(books_location_id != "")
+			{
+				try
+				{
+					books_location_id_num = books_location_id.toLong();
+				}
+				catch (e)
+				{
+					books_location_id_num = null;
+				}
+			}
+
+			entity_branch_lookup_id = null;
+
+			if(books_location_id_num != null)
+			{
+				entity_branch_search = Add_Entity_Branch[Location_ID == books_location_id_num];
+
+				if(entity_branch_search.count() > 0)
+				{
+					// First pass: prefer a branch that also matches the
+					// resolved Entity, to avoid a false match if two
+					// entities happen to share the same location/branch.
+					if(entity_lookup_id != null)
+					{
+						for each ebranch in entity_branch_search
+						{
+							if(ebranch.Entity == entity_lookup_id)
+							{
+								entity_branch_lookup_id = ebranch.ID;
+								break;
+							}
+						}
+					}
+
+					// Fallback: no entity-matched branch found (or no
+					// entity resolved) — just take the first Location_ID
+					// match.
+					if(entity_branch_lookup_id == null)
+					{
+						for each ebranch2 in entity_branch_search
+						{
+							entity_branch_lookup_id = ebranch2.ID;
+							break;
+						}
+					}
+				}
+			}
+
+			info "Books Location ID: " + books_location_id;
+			info "Entity Branch Lookup ID: " + entity_branch_lookup_id;
+
+			// ========================================================
+			// ITEMS
+			// ========================================================
+			item_rows = Collection();
+			line_items = bill.get("line_items");
+
+			if(line_items != null)
+			{
+				for each line_item in line_items
+				{
+					info "--------------------------------------";
+					info "PROCESSING LINE ITEM";
+					info line_item;
+
+					item_row = Bills.Items();
+
+					book_item_name = "";
+
+					if(line_item.get("name") != null)
+					{
+						book_item_name = line_item.get("name").toString();
+					}
+
+					book_account_name = "";
+					book_account_id = "";
+
+					if(line_item.get("account_name") != null)
+					{
+						book_account_name = line_item.get("account_name").toString();
+					}
+
+					if(line_item.get("account_id") != null)
+					{
+						book_account_id = line_item.get("account_id").toString();
+					}
+
+					// ============================================
+					// ITEM NAME (lookup to Add_Item)
+					//
+					// Non-catalog / manual expense lines from Books
+					// have a blank "name". In that case fall back to
+					// matching Add_Item by the GL account name instead
+					// (e.g. "Electricity Cost"), since that's the only
+					// descriptive text Books gives us for these lines.
+					// ============================================
+					item_match_name = book_item_name;
+
+					if(item_match_name == "")
+					{
+						item_match_name = book_account_name;
+					}
+
+					if(item_match_name != "")
+					{
+						creator_item_search = Add_Item[Item_Name == item_match_name];
+
+						if(creator_item_search.count() > 0)
+						{
+							creator_item = null;
+
+							for each itm in creator_item_search
+							{
+								creator_item = itm;
+								break;
+							}
+
+							item_row.Item_Name = creator_item.ID;
+						}
+					}
+
+					info "Item match name used: " + item_match_name;
+					info "Item_Name Lookup ID: " + item_row.Item_Name;
+
+					// ============================================
+					// GL ACCOUNT (lookup to Add_GL_Account)
+					//
+					// Separate from Item_Name — this is the chart-of-
+					// accounts entry for the line (e.g. "Electricity
+					// Cost" / "Internet Expenses"). Match first by
+					// Books' account_id if your master stores it,
+					// otherwise fall back to matching by account name.
+					//
+					// NOTE: confirm the report link name is exactly
+					// "Add_GL_Account" and that it has fields
+					// Books_Account_ID and Account_Name — adjust the
+					// names below if your master report/fields differ.
+					// ============================================
+					gl_account_lookup_id = null;
+
+					if(book_account_id != "")
+					{
+						gl_account_search = Add_GL_Account[Books_Account_ID == book_account_id];
+
+						if(gl_account_search.count() > 0)
+						{
+							for each gl_acc in gl_account_search
+							{
+								gl_account_lookup_id = gl_acc.ID;
+								break;
+							}
+						}
+					}
+
+					if(gl_account_lookup_id == null)
+					{
+						if(book_account_name != "")
+						{
+							gl_account_search2 = Add_GL_Account[Account_Name == book_account_name];
+
+							if(gl_account_search2.count() > 0)
+							{
+								for each gl_acc2 in gl_account_search2
+								{
+									gl_account_lookup_id = gl_acc2.ID;
+									break;
+								}
+							}
+						}
+					}
+
+					if(gl_account_lookup_id != null)
+					{
+						item_row.GL_Account = gl_account_lookup_id;
+					}
+
+					info "GL Account Name: " + book_account_name;
+					info "GL Account Lookup ID: " + gl_account_lookup_id;
+
+
+					if(line_item.get("quantity") != null)
+					{
+						item_row.Quantity = line_item.get("quantity").round(0);
+					}
+
+					if(line_item.get("rate") != null)
+					{
+						item_row.Rate = line_item.get("rate");
+					}
+
+					if(line_item.get("description") != null)
+					{
+						item_row.Item_Description = line_item.get("description").toString();
+					}
+
+					if(line_item.get("item_total") != null)
+					{
+						item_row.Amount = line_item.get("item_total");
+						item_row.Total_Amount = line_item.get("item_total");
+					}
+
+
+					item_cf_map = Map();
+					item_custom_fields = line_item.get("item_custom_fields");
+
+					if(item_custom_fields != null)
+					{
+						for each icf in item_custom_fields
+						{
+							icf_api_name = "";
+							icf_value = null;
+
+							if(icf.get("api_name") != null)
+							{
+								icf_api_name = icf.get("api_name").toString();
+							}
+
+							if(icf.get("value") != null)
+							{
+								icf_value = icf.get("value");
+							}
+
+							if(icf_api_name != "")
+							{
+								item_cf_map.put(icf_api_name.toLowerCase(),icf_value);
+							}
+						}
+					}
+
+					if(item_cf_map.get("cf_budget_id") != null)
+					{
+						budget_value = item_cf_map.get("cf_budget_id");
+
+						if(budget_value != null)
+						{
+							if(budget_value.toString() != "")
+							{
+								item_row.Budget_Code = budget_value;
+							}
+						}
+					}
+
+
+					// Transaction is mandatory on the Items subform. Use
+					// the cf_transaction custom field when Books has it;
+					// otherwise fall back to the line item's own
+					// product_type ("service"/"goods") so this is never
+					// left blank.
+					transaction_value = item_cf_map.get("cf_transaction");
+
+					if(transaction_value != null)
+					{
+						if(transaction_value.toString() == "")
+						{
+							transaction_value = null;
+						}
+					}
+
+					if(transaction_value == null)
+					{
+						line_item_product_type = "";
+
+						if(line_item.get("product_type") != null)
+						{
+							line_item_product_type = line_item.get("product_type").toString();
+						}
+
+						if(line_item_product_type == "goods")
+						{
+							transaction_value = "Goods";
+						}
+						else
+						{
+							transaction_value = "Service";
+						}
+					}
+
+					item_row.Transaction = transaction_value;
+
+
+					service_from_value = item_cf_map.get("cf_service_from");
+
+					if(service_from_value != null)
+					{
+						if(service_from_value.toString() != "")
+						{
+							item_row.Service_From = service_from_value.toString().toDate("yyyy-MM-dd");
+						}
+					}
+
+					service_to_value = item_cf_map.get("cf_service_to");
+
+					if(service_to_value != null)
+					{
+						if(service_to_value.toString() != "")
+						{
+							item_row.Service_To = service_to_value.toString().toDate("yyyy-MM-dd");
+						}
+					}
+
+
+					if(item_cf_map.get("cf_vertical") != null)
+					{
+						pr_value = item_cf_map.get("cf_vertical");
+
+						if(pr_value != null)
+						{
+							if(pr_value.toString() != "")
+							{
+								item_row.PR_ID = pr_value;
+							}
+						}
+					}
+
+					if(item_cf_map.get("cf_cost_type") != null)
+					{
+						cost_type_value = item_cf_map.get("cf_cost_type");
+
+						if(cost_type_value != null)
+						{
+							if(cost_type_value.toString() != "")
+							{
+								item_row.Cost_Type = cost_type_value;
+							}
+						}
+					}
+
+					if(item_cf_map.get("cf_customer_code") != null)
+					{
+						customer_code_value = item_cf_map.get("cf_customer_code");
+
+						if(customer_code_value != null)
+						{
+							if(customer_code_value.toString() != "")
+							{
+								if(customer_code_value.toString() != "null")
+								{
+									item_row.Customer_Code = customer_code_value;
+								}
+							}
+						}
+					}
+
+					if(line_item.get("tds_tax_amount") != null)
+					{
+						item_row.TDS_Amount = line_item.get("tds_tax_amount");
+					}
+
+					if(line_item.get("purchaseorder_id") != null)
+					{
+						po_id_value = line_item.get("purchaseorder_id");
+
+						if(po_id_value != null)
+						{
+							if(po_id_value.toString() != "")
+							{
+								item_row.PO_ID = po_id_value.toString();
+							}
+						}
+					}
+
+					if(line_item.get("line_item_id") != null)
+					{
+						item_row.Service_Goods_ID = line_item.get("line_item_id").toString();
+					}
+
+
+					item_rows.insert(item_row);
+
+				}
+			}
+
+			info "-------";
+			info "READY TO CREATE CREATOR BILL";
+			info "-------";
+			info "Bill Number: " + bill_number;
+			info "Books Bill ID: " + bill_id;
+			info "Vendor: " + vendor_name;
+			info "Vendor Lookup ID: " + vendor_lookup_id;
+			info "Bill Date: " + bill_date;
+			info "Due Date: " + due_date;
+			info "Currency Lookup ID: " + currency_lookup_id;
+			info "Payment Terms Lookup ID: " + payment_terms_lookup_id;
+			info "GST Treatment: " + gst_treatment;
+			info "Source of Supply Lookup ID: " + source_of_supply_lookup_id;
+			info "Destination of Supply Lookup ID: " + destination_of_supply_lookup_id;
+			info "Entity Lookup ID: " + entity_lookup_id;
+			info "Entity Branch Lookup ID: " + entity_branch_lookup_id;
+			info "Invoice Number: " + invoice_number_value;
+			info "Invoice Date: " + invoice_date_value;
+			info "Invoice Received Date: " + invoice_received_date_value;
+			info "Sub Total: " + sub_total;
+			info "Total Amount: " + total_amount;
+			info "Items Count: " + item_rows.size();
+			info "-------";
+
+			if(invoice_number_value == "" || invoice_date_value == null || invoice_received_date_value == null)
+			{
+				info "SKIPPING BILL - Missing mandatory invoice field(s)";
+				info "Bill Number: " + bill_number;
+				info "Books Bill ID: " + bill_id;
+				skipped_count = skipped_count + 1;
+				continue;
+			}
+
+			new_bill = insert into Bills
+			[
+				Bill_Number=bill_number
+				Entity=entity_lookup_id
+				Entity_Branch=entity_branch_lookup_id
+				Invoice_Number=invoice_number_value
+				Invoice_Date=invoice_date_value
+				Invoice_Received_Date=invoice_received_date_value
+				Vendor_Name=vendor_lookup_id
+				Bill_Date=bill_date
+				Due_Date=due_date
+				Order_Number=order_number
+				Currency=currency_lookup_id
+				Payment_Terms=payment_terms_lookup_id
+				GST_Treatment=gst_treatment
+				GSTIN_UIN=gst_no
+				Source_of_Supply=source_of_supply_lookup_id
+				Destination_of_Supply=destination_of_supply_lookup_id
+				Applicable_for_Reverse_Charge=is_reverse_charge
+				Sub_Total=sub_total
+				Total_Tax_Amount=total_tax_amount
+				Total_Amount=total_amount
+				TDS_Amount=tds_amount
+				Notes=notes_value
+				Books_Bill_ID=bill_id
+				Lock_Status=lock_status
+				Vendor_Credit_Status=vendor_credit_status
+				Items=item_rows
+				Added_User=zoho.loginuser
+			];
+
+			info "------";
+			info "CREATOR BILL CREATED SUCCESSFULLY";
+			info "-------";
+			info new_bill;
+			info "Bill Number: " + bill_number;
+			info "Books Bill ID: " + bill_id;
+
+			// ============================================================
+			// VERIFICATION - re-fetch the just-created record by ID and
+			// print its actual stored field values. This confirms the
+			// record genuinely exists and shows exactly what was saved,
+			// without relying on a report-level deep link (which may not
+			// work depending on permalink configuration, and may not even
+			// show the record if that report has a restrictive criteria).
+			// ============================================================
+			verify_record = Bills[ID == new_bill];
+
+			if(verify_record.count() > 0)
+			{
+				for each v_rec in verify_record
+				{
+					info "VERIFIED RECORD IN CREATOR:";
+					info "  Record ID: " + v_rec.ID;
+					info "  Entity: " + v_rec.Entity;
+					info "  Entity_Branch: " + v_rec.Entity_Branch;
+					info "  Payment_Terms: " + v_rec.Payment_Terms;
+					info "  Bill_Number: " + v_rec.Bill_Number;
+					info "  Invoice_Number: " + v_rec.Invoice_Number;
+					info "  Bill_Date: " + v_rec.Bill_Date;
+					info "  Vendor_Name: " + v_rec.Vendor_Name;
+					info "  Books_Bill_ID: " + v_rec.Books_Bill_ID;
+					info "  Total_Amount: " + v_rec.Total_Amount;
+					break;
+				}
+			}
+			else
+			{
+				info "WARNING - could not re-fetch record " + new_bill + " immediately after insert.";
+			}
+
+			info "--------";
+
+			created_count = created_count + 1;
+		}
+
+		page_no = page_no + 1;
+	}
+
+	result = "Bill Import Completed. Created: " + created_count + ", Skipped: " + skipped_count;
+
+	info "--------";
+	info result;
+	info "--------";
+
+	return result;
+}
