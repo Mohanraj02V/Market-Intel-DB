@@ -7,8 +7,10 @@ import LoginPage from '../pages/LoginPage';
 import ProspectsPage from '../pages/ProspectsPage';
 import MarketEventsPage from '../pages/MarketEventsPage';
 import MarketEventDetailPage from '../pages/MarketEventDetailPage';
+import InboxPage from '../pages/InboxPage';
 import ProspectDetailPage from '../pages/ProspectDetailPage';
 import LqPipelinePage from '../pages/LqPipelinePage';
+import LqPipelineDetailPage from '../pages/LqPipelineDetailPage';
 import KeyPeoplePage from '../pages/KeyPeoplePage';
 import KeyPersonDetailPage from '../pages/KeyPersonDetailPage';
 import UserManagementPage from '../pages/UserManagementPage';
@@ -75,10 +77,12 @@ const AppRouter = () => {
           <Route path="market-events" element={<RoleRoute allowedRoles={['PRE']}><MarketEventsPage /></RoleRoute>} />
           <Route path="market-events/:id" element={<RoleRoute allowedRoles={['PRE']}><MarketEventDetailPage /></RoleRoute>} />
           <Route path="pre-tasks" element={<RoleRoute allowedRoles={['PRE']}><PreTasksPage /></RoleRoute>} />
-          <Route path="key-people" element={<RoleRoute allowedRoles={['PRE']}><KeyPeoplePage /></RoleRoute>} />
-          <Route path="key-people/:id" element={<RoleRoute allowedRoles={['PRE']}><KeyPersonDetailPage /></RoleRoute>} />
+          <Route path="key-people" element={<RoleRoute allowedRoles={['PRE', 'LQ']}><KeyPeoplePage /></RoleRoute>} />
+          <Route path="key-people/:id" element={<RoleRoute allowedRoles={['PRE', 'LQ']}><KeyPersonDetailPage /></RoleRoute>} />
           <Route path="users" element={<RoleRoute requireAdmin={true}><UserManagementPage /></RoleRoute>} />
           <Route path="lq-pipeline" element={<RoleRoute allowedRoles={['LQ']}><LqPipelinePage /></RoleRoute>} />
+          <Route path="lq-pipeline/:id" element={<RoleRoute allowedRoles={['LQ']}><LqPipelineDetailPage /></RoleRoute>} />
+          <Route path="inbox" element={<RoleRoute allowedRoles={['LQ']}><InboxPage /></RoleRoute>} />
 
         </Route>
       </Routes>

@@ -9,6 +9,20 @@ from django.utils import timezone
 import utils.encryption as encryption
 import json
 
+def get_email_body(msg):
+    if msg.is_multipart():
+        for part in msg.walk():
+            content_type = part.get_content_type()
+            content_disposition = str(part.get('Content-Disposition'))
+            if 'attachment' not in content_disposition:
+                if content_type == 'text/plain':
+                    return part.get_payload(decode=True).decode(errors='ignore')
+                elif content_type == 'text/html':
+                    return part.get_payload(decode=True).decode(errors='ignore')
+    else:
+        return msg.get_payload(decode=True).decode(errors='ignore')
+    return ""
+
 class Command(BaseCommand):
     help = 'Synchronize IMAP to detect email responses and update Outreach threads.'
 
@@ -97,6 +111,9 @@ class Command(BaseCommand):
                         # Try to match the contact
                         contact = ProspectContact.objects.filter(prospect=matched_email.prospect, official_email=from_email).first()
                         
+                        # Extract body
+                        body_text = get_email_body(msg)
+
                         # Create inbound CommunicationActivity
                         CommunicationActivity.objects.create(
                             
@@ -106,6 +123,7 @@ class Command(BaseCommand):
                             direction='INBOUND',
                             status='Received Response',
                             subject=subject,
+                            notes=body_text,
                             outreach_email=matched_email,
                             performed_by=None # System matched
                         )

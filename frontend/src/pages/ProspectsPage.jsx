@@ -3,7 +3,7 @@ import { useDispatch, useSelector } from 'react-redux';
 import { fetchProspects, deleteProspect } from '../features/prospects/prospectSlice';
 import { fetchMarketEvents } from '../features/marketEvents/marketEventSlice';
 import ProspectForm from '../components/prospects/ProspectForm';
-import { Plus, Search, Edit2, Trash2, Building2, Eye } from 'lucide-react';
+import { Plus, Search, Edit2, Trash2, Building2, Eye, CheckCircle, XCircle } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 const ProspectsPage = () => {
@@ -174,9 +174,17 @@ const ProspectsPage = () => {
                 items.map((prospect) => (
                   <tr key={prospect.id} className="hover:bg-slate-50 transition-colors">
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <Link to={`/prospects/${prospect.id}`} className="text-sm font-medium text-indigo-600 hover:text-indigo-900">
-                        {prospect.company_name}
-                      </Link>
+                      <div className="flex items-center gap-2">
+                        <Link to={`/prospects/${prospect.id}`} className="text-sm font-medium text-indigo-600 hover:text-indigo-900">
+                          {prospect.company_name}
+                        </Link>
+                        {prospect.qualification_status === 'Lead Qualified' && (
+                          <CheckCircle className="w-4 h-4 text-emerald-500" title="Lead Qualified" />
+                        )}
+                        {prospect.qualification_status === 'Budget Frozen' && (
+                          <XCircle className="w-4 h-4 text-red-500" title="Budget Frozen" />
+                        )}
+                      </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-600">{prospect.country_head_office}</td>
                     <td className="px-6 py-4 whitespace-nowrap">

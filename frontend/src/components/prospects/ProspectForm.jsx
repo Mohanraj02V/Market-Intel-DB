@@ -4,11 +4,16 @@ import { fetchMarketEvents } from '../../features/marketEvents/marketEventSlice'
 import { createProspect, updateProspect } from '../../features/prospects/prospectSlice';
 import { X, Plus, Trash2, Building, Network } from 'lucide-react';
 import api from '../../services/api';
+import { toast } from 'react-toastify';
 
 const ProspectForm = ({ isOpen, onClose, prospect = null, highlightFields = [], onSuccess = null }) => {
   const dispatch = useDispatch();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [verifyingEmail, setVerifyingEmail] = useState(null);
+  const [instantVerificationStatus, setInstantVerificationStatus] = useState(null);
+  const [contactVerificationStatuses, setContactVerificationStatuses] = useState({});
+  const { user } = useSelector((state) => state.auth);
   const [parentOptions, setParentOptions] = useState([]);
   const [targetOptions, setTargetOptions] = useState([]);
   const { items: marketEventsList } = useSelector((state) => state.marketEvents);
@@ -72,8 +77,60 @@ const ProspectForm = ({ isOpen, onClose, prospect = null, highlightFields = [], 
     }
   }, [prospect, isOpen]);
 
+  const handleContactVerifyEmail = async (index, email) => {
+    if (!email) return;
+    try {
+      setVerifyingEmail(`contact-${index}`);
+      const res = await api.post('/email-verifications/instant-verify/', {
+        email_address: email
+      });
+      
+      setContactVerificationStatuses(prev => ({ ...prev, [index]: res.data.verification_status }));
+      
+      if (res.data.verification_status === 'VALID') {
+        toast.success("Contact email verified successfully!");
+      } else {
+        toast.warning(`Contact email is ${res.data.verification_status}. Reason: ${res.data.reason}`);
+      }
+    } catch (err) {
+      console.error('Failed to verify contact email:', err);
+      const errorMessage = err.response?.data?.error || err.response?.data?.detail || err.message || 'Unknown error occurred.';
+      toast.error(`Failed to verify contact email: ${errorMessage}`);
+    } finally {
+      setVerifyingEmail(null);
+    }
+  };
+
+  const handleVerifyEmail = async () => {
+    if (!formData.official_email_address) return;
+    
+    try {
+      setVerifyingEmail(formData.official_email_address);
+      const res = await api.post('/email-verifications/instant-verify/', {
+        email_address: formData.official_email_address
+      });
+      
+      setInstantVerificationStatus(res.data.verification_status);
+      
+      if (res.data.verification_status === 'VALID') {
+        toast.success("Email verified successfully!");
+      } else {
+        toast.warning(`Email is ${res.data.verification_status}. Reason: ${res.data.reason}`);
+      }
+    } catch (err) {
+      console.error('Failed to verify email:', err);
+      const errorMessage = err.response?.data?.error || err.response?.data?.detail || err.message || 'Unknown error occurred.';
+      toast.error(`Failed to verify email: ${errorMessage}`);
+    } finally {
+      setVerifyingEmail(null);
+    }
+  };
+
   const handleChange = (e) => {
     const { name, value } = e.target;
+    if (name === 'official_email_address') {
+      setInstantVerificationStatus(null);
+    }
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
@@ -120,6 +177,9 @@ const ProspectForm = ({ isOpen, onClose, prospect = null, highlightFields = [], 
   };
 
   const handleContactChange = (index, field, value) => {
+    if (field === 'official_email') {
+      setContactVerificationStatuses(prev => ({ ...prev, [index]: null }));
+    }
     setFormData(prev => {
       const newContacts = [...prev.key_contacts];
       newContacts[index] = { ...newContacts[index], [field]: value };
@@ -130,6 +190,19 @@ const ProspectForm = ({ isOpen, onClose, prospect = null, highlightFields = [], 
   const handleRemoveContact = (index) => {
     const newContacts = formData.key_contacts.filter((_, i) => i !== index);
     setFormData(prev => ({ ...prev, key_contacts: newContacts }));
+    setContactVerificationStatuses(prev => {
+      const newStatuses = { ...prev };
+      delete newStatuses[index];
+      // re-index the following ones
+      Object.keys(newStatuses).forEach(k => {
+        const kInt = parseInt(k);
+        if (kInt > index) {
+          newStatuses[kInt - 1] = newStatuses[kInt];
+          delete newStatuses[kInt];
+        }
+      });
+      return newStatuses;
+    });
   };
 
   const validate = () => {
@@ -145,6 +218,28 @@ const ProspectForm = ({ isOpen, onClose, prospect = null, highlightFields = [], 
     const uniqueParents = new Set(formData.parent_companies.filter(Boolean));
     if (uniqueParents.size !== formData.parent_companies.filter(Boolean).length) {
       return 'Duplicate parent companies are not allowed';
+    }
+
+    // Check Key Contacts emails
+    for (let i = 0; i < formData.key_contacts.length; i++) {
+      const contact = formData.key_contacts[i];
+      if (contact.official_email) {
+        // If editing an existing contact and email didn't change, bypass verification
+        const existingContact = prospect?.key_contacts?.find(c => c.id === contact.id);
+        const isUnchanged = existingContact && existingContact.official_email === contact.official_email;
+        if (!isUnchanged && contactVerificationStatuses[i] !== 'VALID') {
+          return `Please verify the Official Email for Key Contact: ${contact.contact_name || 'Contact ' + (i + 1)} before proceeding.`;
+        }
+      }
+    }
+
+    // Email verification check
+    if (formData.official_email_address) {
+      // If editing and they haven't touched the email, let it pass.
+      const isUnchanged = prospect && prospect.official_email_address === formData.official_email_address;
+      if (!isUnchanged && instantVerificationStatus !== 'VALID') {
+        return 'Please verify the Official Email Address before proceeding. Only VALID emails are allowed.';
+      }
     }
 
     return null;
@@ -169,6 +264,7 @@ const ProspectForm = ({ isOpen, onClose, prospect = null, highlightFields = [], 
     const validationError = validate();
     if (validationError) {
       setError(validationError);
+      toast.error(validationError);
       return;
     }
 
@@ -390,7 +486,41 @@ const ProspectForm = ({ isOpen, onClose, prospect = null, highlightFields = [], 
                   <input type="text" name="official_phone_number" value={formData.official_phone_number} onChange={handleChange} className={`w-full rounded-lg  shadow-sm  sm:text-sm py-2 px-3 text-slate-900 ${highlightFields?.includes('official_phone_number') ? 'border-2 border-red-500 bg-red-50/30 focus:border-red-500 focus:ring-red-500' : 'border border-slate-300 focus:border-indigo-500 focus:ring-indigo-500'}`} />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Official Email Address</label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-sm font-medium text-slate-700">Official Email Address</label>
+                    {(user?.role === 'PRE' || user?.role === 'LQ') && formData.official_email_address && (
+                      <div className="flex items-center gap-2">
+                        {instantVerificationStatus ? (
+                          <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                            instantVerificationStatus === 'VALID' ? 'bg-emerald-100 text-emerald-700' :
+                            instantVerificationStatus === 'INVALID' ? 'bg-red-100 text-red-700' :
+                            'bg-slate-100 text-slate-700'
+                          }`}>
+                            {instantVerificationStatus}
+                          </span>
+                        ) : prospect?.company_email_verification_status && formData.official_email_address === prospect.official_email_address ? (
+                          <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                            prospect.company_email_verification_status === 'VALID' ? 'bg-emerald-100 text-emerald-700' :
+                            prospect.company_email_verification_status === 'INVALID' ? 'bg-red-100 text-red-700' :
+                            'bg-slate-100 text-slate-700'
+                          }`}>
+                            {prospect.company_email_verification_status}
+                          </span>
+                        ) : null}
+                        
+                        {(!instantVerificationStatus || instantVerificationStatus !== 'VALID') && !(prospect?.company_email_verification_status === 'VALID' && formData.official_email_address === prospect.official_email_address) && (
+                          <button
+                            type="button"
+                            onClick={handleVerifyEmail}
+                            disabled={verifyingEmail === formData.official_email_address || !formData.official_email_address}
+                            className="text-xs font-medium text-indigo-600 hover:text-indigo-800 disabled:opacity-50 border border-indigo-200 bg-indigo-50 px-2 py-0.5 rounded"
+                          >
+                            {verifyingEmail === formData.official_email_address ? 'Verifying...' : 'Check Email'}
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
                   <input type="email" name="official_email_address" value={formData.official_email_address} onChange={handleChange} className={`w-full rounded-lg  shadow-sm  sm:text-sm py-2 px-3 text-slate-900 ${highlightFields?.includes('official_email_address') ? 'border-2 border-red-500 bg-red-50/30 focus:border-red-500 focus:ring-red-500' : 'border border-slate-300 focus:border-indigo-500 focus:ring-indigo-500'}`} />
                 </div>
                 <div>
@@ -566,12 +696,38 @@ const ProspectForm = ({ isOpen, onClose, prospect = null, highlightFields = [], 
                       <input type="text" value={contact.designation} onChange={(e) => handleContactChange(index, 'designation', e.target.value)} className="w-full rounded border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm py-1.5 px-3 border text-slate-900" />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-slate-500 mb-1 uppercase tracking-wider">Official Email</label>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="block text-xs font-medium text-slate-500 uppercase tracking-wider">Official Email</label>
+                        {(user?.role === 'PRE' || user?.role === 'LQ') && contact.official_email && (
+                          <div className="flex items-center gap-2">
+                            {contactVerificationStatuses[index] ? (
+                              <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                                contactVerificationStatuses[index] === 'VALID' ? 'bg-emerald-100 text-emerald-700' :
+                                contactVerificationStatuses[index] === 'INVALID' ? 'bg-red-100 text-red-700' :
+                                'bg-slate-100 text-slate-700'
+                              }`}>
+                                {contactVerificationStatuses[index]}
+                              </span>
+                            ) : null}
+                            
+                            {(!contactVerificationStatuses[index] || contactVerificationStatuses[index] !== 'VALID') && !(prospect?.key_contacts?.find(c => c.id === contact.id)?.official_email === contact.official_email) && (
+                              <button
+                                type="button"
+                                onClick={() => handleContactVerifyEmail(index, contact.official_email)}
+                                disabled={verifyingEmail === `contact-${index}` || !contact.official_email}
+                                className="text-[10px] font-medium text-indigo-600 hover:text-indigo-800 disabled:opacity-50 border border-indigo-200 bg-indigo-50 px-2 py-0.5 rounded"
+                              >
+                                {verifyingEmail === `contact-${index}` ? 'Verifying...' : 'Check'}
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
                       <input type="email" value={contact.official_email} onChange={(e) => handleContactChange(index, 'official_email', e.target.value)} className="w-full rounded border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm py-1.5 px-3 border text-slate-900" />
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-slate-500 mb-1 uppercase tracking-wider">Phone Number</label>
-                      <input type="text" value={contact.phone_number} onChange={(e) => handleContactChange(index, 'phone_number', e.target.value)} className="w-full rounded border-slate-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm py-1.5 px-3 border text-slate-900" />
+                      <input type="text" value={contact.phone_number} onChange={(e) => handleContactChange(index, 'phone_number', e.target.value)} className={`w-full rounded shadow-sm sm:text-sm py-1.5 px-3 text-slate-900 ${contact.latest_call_status === 'Invalid Number' ? 'border-2 border-red-500 bg-red-50/30 focus:border-red-500 focus:ring-red-500' : 'border border-slate-300 focus:border-indigo-500 focus:ring-indigo-500'}`} />
                     </div>
                     <div className="md:col-span-2">
                       <label className="block text-xs font-medium text-slate-500 mb-1 uppercase tracking-wider">LinkedIn Profile</label>

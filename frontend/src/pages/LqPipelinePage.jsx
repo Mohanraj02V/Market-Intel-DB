@@ -3,7 +3,7 @@ import { useDispatch, useSelector } from 'react-redux';
 import { 
   Building2, AlertTriangle, CheckCircle, Phone, Search, 
   CheckCircle2, AlertCircle, PlayCircle, RefreshCw,
-  FileEdit, Mail
+  FileEdit, Mail, XCircle
 } from 'lucide-react';
 import { 
   fetchLqPipeline, 
@@ -20,6 +20,7 @@ const LqPipelinePage = () => {
   
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
+  const [verificationFilter, setVerificationFilter] = useState('All');
   
   const [selectedLq, setSelectedLq] = useState(null);
   const [showWorkspace, setShowWorkspace] = useState(false);
@@ -43,6 +44,7 @@ const LqPipelinePage = () => {
       if (statusFilter === 'Issue Sent to PRE' && item.pre_task_status !== 'ISSUE_SENT_TO_PRE') return false;
       if (statusFilter !== 'Issue Sent to PRE' && item.verification_status !== statusFilter) return false;
     }
+    if (verificationFilter !== 'All' && item.verification_status !== verificationFilter) return false;
     if (searchTerm) {
       const s = searchTerm.toLowerCase();
       const p = item.prospect;
@@ -192,8 +194,8 @@ const LqPipelinePage = () => {
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
         <div className="p-4 border-b border-slate-200 space-y-3">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div className="flex items-center gap-3 flex-1 max-w-md">
-              <div className="relative flex-1">
+            <div className="flex items-center gap-3 flex-1">
+              <div className="relative flex-1 max-w-md">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                 <input 
                   type="text" 
@@ -203,6 +205,16 @@ const LqPipelinePage = () => {
                   onChange={(e) => setSearchTerm(e.target.value)}
                 />
               </div>
+              <select
+                value={verificationFilter}
+                onChange={(e) => setVerificationFilter(e.target.value)}
+                className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-700 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-300"
+              >
+                <option value="All">All Statuses</option>
+                <option value="Unverified">Unverified</option>
+                <option value="In Progress">In Progress</option>
+                <option value="Verified">Verified</option>
+              </select>
             </div>
 
           </div>
@@ -224,17 +236,19 @@ const LqPipelinePage = () => {
                 const isIssue = item.pre_task_status === 'ISSUE_SENT_TO_PRE';
                 const isUpdated = item.pre_task_status === 'PRE_UPDATED';
                 const isBudgetFrozen = item.qualification_status === 'Budget Frozen';
-                const isProspectSelected = item.qualification_status === 'Prospect Selected';
+                const isLeadQualified = item.qualification_status === 'Lead Qualified';
 
                 return (
                   <tr key={item.id} className="hover:bg-slate-50/80 transition">
                     <td className="p-3.5">
                       <div className="flex items-start gap-3">
-                        <div className="w-9 h-9 rounded-xl bg-slate-100 border border-slate-200 text-slate-700 font-black text-xs flex items-center justify-center shrink-0 mt-0.5">
-                          {p.company_name?.charAt(0)}
+                        <div className="w-9 h-9 rounded-xl bg-indigo-50 border border-indigo-100 text-indigo-600 flex items-center justify-center shrink-0 mt-0.5">
+                          <Building2 className="w-5 h-5" />
                         </div>
                         <div>
-                          <div className="font-bold text-slate-900 text-sm">{p.company_name}</div>
+                          <Link to={`/lq-pipeline/${item.id}`} className="font-bold text-indigo-600 hover:text-indigo-800 hover:underline text-sm transition">
+                            {p.company_name}
+                          </Link>
                           <p className="text-[11px] text-slate-500 mt-0.5">
                             {p.country_head_office} &bull; {p.primary_industries}
                           </p>
@@ -273,18 +287,19 @@ const LqPipelinePage = () => {
                       ) : (
                         <button
                           onClick={() => openWorkspace(item)}
-                          disabled={isIssue || isBudgetFrozen}
+                          disabled={isBudgetFrozen}
                           title={isBudgetFrozen ? 'Outreach disabled — Prospect is Budget Frozen' : ''}
                           className={`px-3 py-1.5 rounded text-[11px] font-bold transition flex items-center gap-1 ml-auto ${
-                            isIssue || isBudgetFrozen ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 
+                            isBudgetFrozen ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 
+                            isIssue ? 'bg-amber-600 hover:bg-amber-700 text-white' :
                             item.verification_status === 'Verified' ? 'bg-indigo-600 hover:bg-indigo-700 text-white' : 
                             'bg-slate-800 hover:bg-slate-900 text-white'
                           }`}
                         >
                           {isBudgetFrozen ? (
-                            <><span className="text-slate-500">🚫 Budget Frozen</span></>
-                          ) : isProspectSelected ? (
-                            <><Phone className="w-3 h-3" /> Prospect Selected</>
+                            <><XCircle className="w-3 h-3 text-red-500" /><span className="text-red-500">Budget Frozen</span></>
+                          ) : isLeadQualified ? (
+                            <><CheckCircle className="w-4 h-4 text-emerald-500" /> <span className="text-emerald-500">Lead Qualified</span></>
                           ) : item.verification_status === 'Verified' ? (
                             <><Phone className="w-3 h-3" /> Outreach</>
                           ) : (

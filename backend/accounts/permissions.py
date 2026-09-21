@@ -1,7 +1,9 @@
-﻿from rest_framework import permissions
+from rest_framework import permissions
 
 class IsPRE(permissions.BasePermission):
     def has_permission(self, request, view):
+        if request.user and request.user.is_superuser:
+            return True
         return bool(
             request.user and 
             request.user.is_authenticated and 
@@ -11,6 +13,8 @@ class IsPRE(permissions.BasePermission):
 
 class IsLQ(permissions.BasePermission):
     def has_permission(self, request, view):
+        if request.user and request.user.is_superuser:
+            return True
         return bool(
             request.user and 
             request.user.is_authenticated and 
@@ -20,6 +24,8 @@ class IsLQ(permissions.BasePermission):
 
 class IsPREOrLQ(permissions.BasePermission):
     def has_permission(self, request, view):
+        if request.user and request.user.is_superuser:
+            return True
         return bool(
             request.user and 
             request.user.is_authenticated and 

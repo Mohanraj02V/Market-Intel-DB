@@ -36,7 +36,7 @@ export default function LqWorkspaceModal({
   // Get safe prospect reference
   const prospect = selectedLq?.prospect || {};
   const isVerified = selectedLq?.verification_status === 'Verified';
-  const isProspectSelected = selectedLq?.qualification_status === 'Lead Qualified';
+  const isLeadQualified = selectedLq?.qualification_status === 'Lead Qualified';
 
   // --- OUTREACH  // Outreach State
   // Initialize from prop, but will be overridden by fresh fetch below
@@ -50,10 +50,6 @@ export default function LqWorkspaceModal({
   const [emailBody, setEmailBody] = useState(`Dear ${prospect.company_name || 'Team'},\n\nWe are pleased to introduce our solution portfolio tailored for ${prospect.primary_industries || 'your industry'}. We would love to schedule a brief introductory discussion to explore potential alignment.\n\nBest regards,\nLead Qualification Team`);
   const [attachments, setAttachments] = useState([]);
   const [attachmentError, setAttachmentError] = useState('');
-  
-  // Verification States
-  const [emailVerifications, setEmailVerifications] = useState({});
-  const [verifyingEmail, setVerifyingEmail] = useState(null);
   const [isSendingEmail, setIsSendingEmail] = useState(false);
   const [senderMailStatus, setSenderMailStatus] = useState(null);
 
@@ -100,7 +96,7 @@ export default function LqWorkspaceModal({
     }
   }, [sharedContactEmail, sharedContactPhone, prospect]);
   const [notInterestedReason, setNotInterestedReason] = useState('');
-  const [prospectSelectedDescription, setProspectSelectedDescription] = useState('');
+  const [leadQualifiedDescription, setLeadQualifiedDescription] = useState('');
   const [meetingDate, setMeetingDate] = useState('');
   const [meetingTime, setMeetingTime] = useState('');
   const [meetingLink, setMeetingLink] = useState('');
@@ -123,17 +119,9 @@ export default function LqWorkspaceModal({
       
       // Also fetch outreach logs immediately on open (not just on tab switch)
       fetchOutreachLogs();
-      
-      // Fetch verifications
-      api.get(`/email-verifications/?prospect=${prospect.id}`)
-        .then(res => {
-          const vMap = {};
-          res.data.forEach(v => { vMap[v.email_address] = v; });
-          setEmailVerifications(vMap);
-        }).catch(err => console.error('Failed to fetch verifications', err));
         
       // Fetch sender mail account status
-      api.get('/mail-account/')
+      api.get('/auth/mail-account/')
         .then(res => {
           if(res.data && res.data.length > 0) {
             setSenderMailStatus(res.data[0]);
@@ -169,6 +157,25 @@ export default function LqWorkspaceModal({
       return latest.status;
     }
     return null;
+  };
+
+
+  const isContactLockedCheck = (contactId) => {
+    const relevantLogs = contactId
+      ? outreachLogs.filter(log => log.prospect_contact === contactId && log.activity_type === 'CALL')
+      : outreachLogs.filter(log => !log.prospect_contact && log.activity_type === 'CALL');
+    const latest = relevantLogs[0];
+    
+    if (latest && (latest.outcome === 'Lead Qualified' || latest.outcome === 'Not Interested')) {
+      return true;
+    }
+
+    const isIssuePending = selectedLq.pre_task_status === 'ISSUE_SENT_TO_PRE' || localIssueSent;
+    if (isIssuePending && latest && latest.status === 'Invalid Number') {
+      return true;
+    }
+
+    return false;
   };
 
   const getGeneralLatestCall = () => {
@@ -208,35 +215,7 @@ export default function LqWorkspaceModal({
     if (ccEmails.includes(email)) setCcEmails(ccEmails.filter(e => e !== email));
     else setCcEmails([...ccEmails, email]);
   };
-
-  const handleVerifyEmail = async (email, contactId = null) => {
-    setVerifyingEmail(email);
-    try {
-      const res = await api.post('/email-verifications/verify/', {
-        prospect_id: prospect.id,
-        prospect_contact_id: contactId,
-        email_address: email
-      });
-      setEmailVerifications(prev => ({ ...prev, [email]: res.data }));
-      toast.success(res.data.verification_status === 'VALID' ? 'Email verified successfully!' : 'Email verification completed with warnings.');
-    } catch (err) {
-      toast.error('Verification failed. ' + (err.response?.data?.error || ''));
-    } finally {
-      setVerifyingEmail(null);
-    }
-  };
-
-  const handleConfirmEmail = async (verificationId, email) => {
-    try {
-      const res = await api.post(`/email-verifications/${verificationId}/confirm/`);
-      setEmailVerifications(prev => ({ ...prev, [email]: res.data }));
-      toast.success('Email confirmed for outreach.');
-    } catch (err) {
-      toast.error('Failed to confirm email. ' + (err.response?.data?.error || ''));
-    }
-  };
-
-  const handleAddCustomRecipient = (e) => {
+const handleAddCustomRecipient = (e) => {
     e.preventDefault();
     const em = customRecipientInput.trim();
     if (em && !ccEmails.includes(em) && !toEmails.includes(em)) {
@@ -334,6 +313,7 @@ export default function LqWorkspaceModal({
   };
 
   const [callError, setCallError] = useState('');
+  const [localIssueSent, setLocalIssueSent] = useState(false);
 
   const handleLogCallOutcome = async (e) => {
     e.preventDefault();
@@ -365,7 +345,7 @@ export default function LqWorkspaceModal({
         setCallError('Meeting Date and Time are required.');
         return;
       }
-      if (!prospectSelectedDescription.trim()) {
+      if (!leadQualifiedDescription.trim()) {
         setCallError('Meeting Agenda is required.');
         return;
       }
@@ -399,7 +379,7 @@ export default function LqWorkspaceModal({
       else if (communicationOutcome === 'Lead Qualified') {
         detailsParts.push(`Outcome: Lead Qualified (Meeting Scheduled: ${meetingDate} at ${meetingTime})`);
         if (meetingLink) detailsParts.push(`Link: ${meetingLink}`);
-        detailsParts.push(`Agenda: ${prospectSelectedDescription}`);
+        detailsParts.push(`Agenda: ${leadQualifiedDescription}`);
       }
     }
     
@@ -428,8 +408,8 @@ export default function LqWorkspaceModal({
             issue_category: 'Invalid Phone Number',
             issue_details: `The phone number is invalid. Please find the correct contact number.`
           });
-          toast.info("Issue reported to PRE: Invalid Number");
-          onClose(); // close the modal
+          toast.info("Issue reported to PRE: Invalid Number. Contact restricted.");
+          setLocalIssueSent(true);
           return;
         } catch (err) {
           console.error("Failed to report invalid number issue", err);
@@ -451,12 +431,12 @@ export default function LqWorkspaceModal({
     if (callStatus === 'Connected' && ['Call Back Later', 'Lead Qualified'].includes(communicationOutcome)) {
       const dVal = communicationOutcome === 'Lead Qualified' ? meetingDate : callbackDate;
       const tVal = communicationOutcome === 'Lead Qualified' ? meetingTime : callbackTime;
-      const descVal = communicationOutcome === 'Lead Qualified' ? `Meeting\nLink: ${meetingLink}\nAgenda: ${prospectSelectedDescription}` : (callbackDescription || 'Call Back Later');
+      const descVal = communicationOutcome === 'Lead Qualified' ? `Meeting\nLink: ${meetingLink}\nAgenda: ${leadQualifiedDescription}` : (callbackDescription || 'Call Back Later');
       if (dVal && tVal) {
         try {
           api.post('/reminders/', { prospect: prospect.id, scheduled_datetime: `${dVal}T${tVal}:00`, description: descVal });
           if (communicationOutcome === 'Call Back Later') { setCallbackDate(''); setCallbackTime(''); setCallbackDescription(''); }
-          else { setMeetingDate(''); setMeetingTime(''); setMeetingLink(''); setProspectSelectedDescription(''); }
+          else { setMeetingDate(''); setMeetingTime(''); setMeetingLink(''); setLeadQualifiedDescription(''); }
         } catch (e) {}
       }
     }
@@ -485,15 +465,10 @@ export default function LqWorkspaceModal({
     }
 
     // === STATUS UPDATES & MODAL CLOSE AFTER SAVE ===
-    // Not Interested → set qualification_status to 'Budget Frozen' + close outreach
+    // Not Interested
     if (callStatus === 'Connected' && communicationOutcome === 'Not Interested') {
-      try {
-        await api.patch(`/lq-pipeline/${selectedLq.id}/`, { qualification_status: 'Budget Frozen' });
-      } catch (err) {
-        console.error('Failed to update qualification status to Budget Frozen', err);
-      }
       setNotInterestedReason('');
-      onClose(); // close the modal — outreach is done
+      onClose(); // close the modal
       return;
     }
 
@@ -504,7 +479,7 @@ export default function LqWorkspaceModal({
       } catch (err) {
         console.error('Failed to update qualification status to Prospect Selected', err);
       }
-      setProspectSelectedDescription('');
+      setLeadQualifiedDescription('');
       onClose(); // close the modal
       return;
     }
@@ -701,6 +676,7 @@ export default function LqWorkspaceModal({
           )}
 
           {activeTab === 'outreach' && (
+
             <div className="space-y-6">
               {!isVerified ? (
                 <div className="p-8 bg-white border border-slate-200 rounded-2xl text-center space-y-4 shadow-sm">
@@ -741,7 +717,7 @@ export default function LqWorkspaceModal({
                       <div className="flex items-center gap-2 shrink-0">
                         <div className="hidden sm:flex items-center gap-1 bg-slate-800/80 p-1 rounded-xl border border-slate-700/80 text-[11px]">
                           {['Sent', 'Waiting for Response', 'Received Response'].map(st => (
-                            <button key={st} onClick={() => handleUpdateEmailProgressStatus(st)} className={`px-2.5 py-1 rounded-lg font-bold transition ${emailProgress === st ? 'bg-indigo-600 text-white' : 'text-slate-300 hover:text-white hover:bg-slate-700/60'}`}>{st}</button>
+                            <button key={st} disabled={true} className={`px-2.5 py-1 rounded-lg font-bold transition cursor-not-allowed ${emailProgress === st ? 'bg-indigo-600 text-white' : 'text-slate-400 opacity-70'}`}>{st}</button>
                           ))}
                         </div>
                         {emailProgress === 'Waiting for Response' && (
@@ -792,34 +768,6 @@ export default function LqWorkspaceModal({
                                     <span className="text-[10px] text-slate-400 font-semibold">{contact.contact_name} ({contact.designation}) - TO</span>
                                   </div>
                                 </label>
-                                <div className="flex items-center gap-2 pl-6">
-                                  {emailVerifications[contact.official_email] ? (
-                                    <>
-                                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
-                                        emailVerifications[contact.official_email].verification_status === 'VALID' ? 'bg-emerald-100 text-emerald-700' :
-                                        emailVerifications[contact.official_email].verification_status === 'INVALID' ? 'bg-red-100 text-red-700' :
-                                        emailVerifications[contact.official_email].verification_status === 'UNKNOWN' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-700'
-                                      }`}>
-                                        {emailVerifications[contact.official_email].verification_status}
-                                      </span>
-                                      {emailVerifications[contact.official_email].verification_status === 'VALID' && !emailVerifications[contact.official_email].confirmed_by_lq && (
-                                        <button type="button" onClick={() => handleConfirmEmail(emailVerifications[contact.official_email].id, contact.official_email)} className="text-[10px] bg-indigo-600 text-white px-2 py-0.5 rounded-md font-bold hover:bg-indigo-700">Confirm</button>
-                                      )}
-                                      {emailVerifications[contact.official_email].confirmed_by_lq && (
-                                        <span className="text-[10px] text-emerald-600 font-bold flex items-center gap-1">✓ Confirmed</span>
-                                      )}
-                                      {emailVerifications[contact.official_email].verification_status !== 'VALID' && (
-                                        <button type="button" onClick={() => handleVerifyEmail(contact.official_email, contact.id)} disabled={verifyingEmail === contact.official_email} className="text-[10px] bg-slate-200 text-slate-700 px-2 py-0.5 rounded-md font-bold hover:bg-slate-300">
-                                          {verifyingEmail === contact.official_email ? '...' : 'Reverify'}
-                                        </button>
-                                      )}
-                                    </>
-                                  ) : (
-                                    <button type="button" onClick={() => handleVerifyEmail(contact.official_email, contact.id)} disabled={verifyingEmail === contact.official_email} className="text-[10px] bg-slate-800 text-white px-2 py-0.5 rounded-md font-bold hover:bg-slate-900 transition">
-                                      {verifyingEmail === contact.official_email ? 'Verifying...' : 'Verify Email'}
-                                    </button>
-                                  )}
-                                </div>
                               </div>
                             ))}
                             
@@ -832,34 +780,7 @@ export default function LqWorkspaceModal({
                                     <span className="text-[10px] text-slate-400 font-semibold">Reception / Official Email - CC</span>
                                   </div>
                                 </label>
-                                <div className="flex items-center gap-2 pl-6">
-                                  {emailVerifications[prospect.official_email_address] ? (
-                                    <>
-                                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
-                                        emailVerifications[prospect.official_email_address].verification_status === 'VALID' ? 'bg-emerald-100 text-emerald-700' :
-                                        emailVerifications[prospect.official_email_address].verification_status === 'INVALID' ? 'bg-red-100 text-red-700' :
-                                        emailVerifications[prospect.official_email_address].verification_status === 'UNKNOWN' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-700'
-                                      }`}>
-                                        {emailVerifications[prospect.official_email_address].verification_status}
-                                      </span>
-                                      {emailVerifications[prospect.official_email_address].verification_status === 'VALID' && !emailVerifications[prospect.official_email_address].confirmed_by_lq && (
-                                        <button type="button" onClick={() => handleConfirmEmail(emailVerifications[prospect.official_email_address].id, prospect.official_email_address)} className="text-[10px] bg-indigo-600 text-white px-2 py-0.5 rounded-md font-bold hover:bg-indigo-700">Confirm</button>
-                                      )}
-                                      {emailVerifications[prospect.official_email_address].confirmed_by_lq && (
-                                        <span className="text-[10px] text-emerald-600 font-bold flex items-center gap-1">✓ Confirmed</span>
-                                      )}
-                                      {emailVerifications[prospect.official_email_address].verification_status !== 'VALID' && (
-                                        <button type="button" onClick={() => handleVerifyEmail(prospect.official_email_address, null)} disabled={verifyingEmail === prospect.official_email_address} className="text-[10px] bg-slate-200 text-slate-700 px-2 py-0.5 rounded-md font-bold hover:bg-slate-300">
-                                          {verifyingEmail === prospect.official_email_address ? '...' : 'Reverify'}
-                                        </button>
-                                      )}
-                                    </>
-                                  ) : (
-                                    <button type="button" onClick={() => handleVerifyEmail(prospect.official_email_address, null)} disabled={verifyingEmail === prospect.official_email_address} className="text-[10px] bg-slate-800 text-white px-2 py-0.5 rounded-md font-bold hover:bg-slate-900 transition">
-                                      {verifyingEmail === prospect.official_email_address ? 'Verifying...' : 'Verify Email'}
-                                    </button>
-                                  )}
-                                </div>
+
                               </div>
                             )}
                             
@@ -928,7 +849,7 @@ export default function LqWorkspaceModal({
                           <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-600">
                             <span>Selected Recipients:</span><span className="px-2 py-0.5 rounded bg-indigo-100 text-indigo-800 font-extrabold">{toEmails.length + ccEmails.length} Address(es)</span>
                           </div>
-                          <button type="button" onClick={handleSendIntroEmail} disabled={isSendingEmail || (toEmails.length === 0 && ccEmails.length === 0) || isEmailSent || [...toEmails, ...ccEmails].some(e => !emailVerifications[e] || emailVerifications[e].verification_status !== 'VALID' || !emailVerifications[e].confirmed_by_lq)} className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-black rounded-xl text-xs transition cursor-pointer shadow-sm flex items-center gap-2">
+                          <button type="button" onClick={handleSendIntroEmail} disabled={isSendingEmail || (toEmails.length === 0 && ccEmails.length === 0) || isEmailSent} className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-black rounded-xl text-xs transition cursor-pointer shadow-sm flex items-center gap-2">
                             <Mail className="w-4 h-4" /> <span>{isSendingEmail ? 'Sending Email...' : 'Send Introduction Email & Mark Sent'}</span>
                           </button>
                         </div>
@@ -949,7 +870,7 @@ export default function LqWorkspaceModal({
                           <p className="text-xs text-slate-300 mt-0.5">Record phone call status, IVR extension, and live conversation outcomes.</p>
                         </div>
                       </div>
-                      {prospect.official_phone_number && (
+                      {prospect.official_phone_number && !isContactLockedCheck(null) && (
                         <a href={`tel:${prospect.official_phone_number}`} className="hidden sm:flex px-3 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-black text-xs rounded-xl transition items-center gap-1.5 shadow-sm">
                           <Phone className="w-3.5 h-3.5" /> <span>Call {prospect.official_phone_number}</span>
                         </a>
@@ -1021,7 +942,7 @@ export default function LqWorkspaceModal({
                                 <span className="font-extrabold text-emerald-950 text-xs">
                                   {selectedContactData.contact_name}: {selectedContactData.phone_number || 'No phone on record'}
                                 </span>
-                                {selectedContactData.phone_number && (
+                                {selectedContactData.phone_number && !isContactLockedCheck(selectedContactId) && (
                                   <a href={`tel:${selectedContactData.phone_number}`} className="px-2 py-0.5 bg-emerald-500 hover:bg-emerald-600 text-white font-black text-[10px] rounded-lg transition">
                                     Call Now
                                   </a>
@@ -1032,7 +953,7 @@ export default function LqWorkspaceModal({
                                 <span className="font-extrabold text-emerald-950 text-xs">
                                   Official Company Number: {prospect.official_phone_number || 'No phone'}
                                 </span>
-                                {prospect.official_phone_number && (
+                                {prospect.official_phone_number && !isContactLockedCheck(null) && (
                                   <a href={`tel:${prospect.official_phone_number}`} className="px-2 py-0.5 bg-emerald-500 hover:bg-emerald-600 text-white font-black text-[10px] rounded-lg transition">
                                     Call Now
                                   </a>
@@ -1054,8 +975,9 @@ export default function LqWorkspaceModal({
                               <button
                                 key={label}
                                 type="button"
+                                disabled={isContactLockedCheck(selectedContactId)}
                                 onClick={() => setCallStatus(label)}
-                                className={`p-2.5 rounded-xl border text-center font-extrabold text-xs transition-all ${callStatus === label ? active : idle}`}
+                                className={`p-2.5 rounded-xl border text-center font-extrabold text-xs transition-all ${callStatus === label ? active : idle} ${isContactLockedCheck(selectedContactId) ? 'opacity-50 cursor-not-allowed' : ''}`}
                               >
                                 {label}
                               </button>
@@ -1068,13 +990,13 @@ export default function LqWorkspaceModal({
                               <label className="block font-extrabold text-slate-900 mb-1.5 uppercase tracking-wider text-[10px] flex items-center gap-1.5"><TrendingUp className="w-3.5 h-3.5 text-emerald-600" /><span>2. Record Communication Progress Outcome</span></label>
                               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                                 {['Requested Email', 'Call Back Later', 'Call Transferred', 'Shared Another Contact', 'Not Interested', 'Lead Qualified'].map(out => (
-                                  <button key={out} type="button" onClick={() => setCommunicationOutcome(out)} className={`p-2.5 rounded-xl border text-left font-extrabold text-xs transition flex items-center justify-between ${
+                                  <button key={out} type="button" disabled={isContactLockedCheck(selectedContactId)} onClick={() => setCommunicationOutcome(out)} className={`p-2.5 rounded-xl border text-left font-extrabold text-xs transition flex items-center justify-between ${
                                     communicationOutcome === out ?
                                       out === 'Not Interested' ? 'bg-rose-50 border-rose-500 text-rose-950 shadow-sm' :
                                       out === 'Lead Qualified' ? 'bg-emerald-50 border-emerald-500 text-emerald-950 shadow-sm' :
                                       'bg-emerald-50 border-emerald-500 text-emerald-950 shadow-sm'
                                     : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
-                                  }`}>
+                                  } ${isContactLockedCheck(selectedContactId) ? 'opacity-50 cursor-not-allowed hover:bg-transparent' : ''}`}>
                                     <span>{out}</span>{communicationOutcome === out && <CheckCircle className="w-4 h-4 text-emerald-600" />}
                                   </button>
                                 ))}
@@ -1179,7 +1101,7 @@ export default function LqWorkspaceModal({
                                 </div>
                                 <div>
                                   <label className="block text-[11px] font-bold text-slate-700 mb-1">Agenda *</label>
-                                  <textarea rows={2} value={prospectSelectedDescription} onChange={(e) => setProspectSelectedDescription(e.target.value)} className={`w-full p-2 bg-white border rounded-xl text-xs resize-none ${prospectSelectedDescription.trim() ? 'border-emerald-300' : 'border-red-400'}`} />
+                                  <textarea rows={2} value={leadQualifiedDescription} onChange={(e) => setLeadQualifiedDescription(e.target.value)} className={`w-full p-2 bg-white border rounded-xl text-xs resize-none ${leadQualifiedDescription.trim() ? 'border-emerald-300' : 'border-red-400'}`} />
                                 </div>
                               </div>
                             )}
@@ -1200,9 +1122,14 @@ export default function LqWorkspaceModal({
                             </div>
                           )}
                           <div className="flex justify-end">
-                            <button type="submit" className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl transition cursor-pointer shadow-sm flex items-center gap-2">
-                              <Phone className="w-4 h-4" /><span>Record Call Outcome &amp; Save Activity</span>
-                            </button>
+                            {(() => {
+                              const isContactInvalid = isContactLockedCheck(selectedContactId);
+                              return (
+                                <button type="submit" disabled={isContactInvalid} className={`px-5 py-2.5 font-extrabold text-xs rounded-xl transition shadow-sm flex items-center gap-2 ${isContactInvalid ? 'bg-slate-300 text-slate-500 cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer'}`}>
+                                  <Phone className="w-4 h-4" /><span>Record Call Outcome &amp; Save Activity</span>
+                                </button>
+                              );
+                            })()}
                           </div>
                         </div>
                       </form>
@@ -1224,13 +1151,14 @@ export default function LqWorkspaceModal({
                                 <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${log.activity_type === 'CALL_MADE' ? 'bg-emerald-100 text-emerald-900' : 'bg-indigo-100 text-indigo-900'}`}>{log.activity_type}</span>
                                 {log.status && <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${log.activity_type === 'CALL_MADE' ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-indigo-50 text-indigo-800 border-indigo-200'}`}>{log.activity_type}: {log.status}</span>}
                                 {log.outcome && <span className="px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-bold">Outcome: {log.outcome}</span>}
+                                {log.contact_name && <span className="px-2 py-0.5 rounded bg-blue-50 text-blue-800 border border-blue-200 text-[10px] font-bold">Contact: {log.contact_name}</span>}
                               </div>
                               <span className="text-[10px] text-slate-400 font-semibold flex items-center gap-1">
                                 {new Date(log.created_at).toLocaleString()} 
                                 <span className="bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded ml-1">{log.created_by_name}</span>
                               </span>
                             </div>
-                            <p className="text-slate-700 font-medium whitespace-pre-line leading-relaxed">{log.notes}</p>
+                            <p className="text-slate-700 font-medium whitespace-pre-line leading-relaxed max-h-48 overflow-y-auto bg-white p-2 rounded border border-slate-100">{log.notes}</p>
                           </div>
                         ))}
                       </div>

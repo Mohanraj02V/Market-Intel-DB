@@ -88,9 +88,15 @@ def verify_email_engine(email: str) -> Dict[str, Any]:
             result['smtp_valid'] = True
             result['reason'] = 'Mailbox accepted SMTP verification.'
         elif code >= 500:
-            # Permanent rejection (e.g. 550 User unknown)
-            result['status'] = 'INVALID'
-            result['reason'] = f"Mailbox rejected recipient. Permanent error: {code} {resp.decode('utf-8', errors='ignore')}"
+            resp_text = resp.decode('utf-8', errors='ignore').lower()
+            # If the 5xx error is due to IP blocking, policy, or spamhaus, it's our problem, not the email's problem.
+            if any(keyword in resp_text for keyword in ['policy', 'spamhaus', 'dynamic ip', 'blocked', 'banned']):
+                result['status'] = 'UNKNOWN'
+                result['reason'] = f"SMTP verification blocked by recipient policy (IP/spam): {code} {resp_text}"
+            else:
+                # Permanent rejection (e.g. 550 User unknown)
+                result['status'] = 'INVALID'
+                result['reason'] = f"Mailbox rejected recipient. Permanent error: {code} {resp.decode('utf-8', errors='ignore')}"
         else:
             # Temporary error (e.g. 450, 451) or greylisting
             result['status'] = 'UNKNOWN'

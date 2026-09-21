@@ -12,6 +12,8 @@ class ProspectContactSerializer(serializers.ModelSerializer):
     prospect_name = serializers.CharField(source='prospect.company_name', read_only=True)
     latest_call_status = serializers.SerializerMethodField()
     latest_communication_outcome = serializers.SerializerMethodField()
+    email_verification_status = serializers.SerializerMethodField()
+    email_verification_id = serializers.SerializerMethodField()
 
     def get_latest_call_status(self, obj):
         latest = obj.call_activities.order_by('-created_at').first()
@@ -21,10 +23,18 @@ class ProspectContactSerializer(serializers.ModelSerializer):
         latest = obj.call_activities.order_by('-created_at').first()
         return latest.communication_outcome if latest else None
 
+    def get_email_verification_status(self, obj):
+        verification = obj.prospect.email_verifications.filter(email_address=obj.official_email).order_by('-updated_at').first()
+        return verification.verification_status if verification else None
+
+    def get_email_verification_id(self, obj):
+        verification = obj.prospect.email_verifications.filter(email_address=obj.official_email).order_by('-updated_at').first()
+        return str(verification.id) if verification else None
+
     class Meta:
         model = ProspectContact
-        fields = ['id', 'prospect', 'prospect_name', 'contact_name', 'designation', 'official_email', 'phone_number', 'linkedin_profile', 'latest_call_status', 'latest_communication_outcome', 'created_at', 'updated_at']
-        read_only_fields = ['id', 'prospect', 'prospect_name', 'latest_call_status', 'latest_communication_outcome', 'created_at', 'updated_at']
+        fields = ['id', 'prospect', 'prospect_name', 'contact_name', 'designation', 'official_email', 'phone_number', 'linkedin_profile', 'latest_call_status', 'latest_communication_outcome', 'email_verification_status', 'email_verification_id', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'prospect', 'prospect_name', 'latest_call_status', 'latest_communication_outcome', 'email_verification_status', 'email_verification_id', 'created_at', 'updated_at']
 
 class ProspectSimpleSerializer(serializers.ModelSerializer):
     class Meta:
@@ -38,6 +48,13 @@ class ProspectSerializer(serializers.ModelSerializer):
     services = serializers.SerializerMethodField()
     solutions = serializers.SerializerMethodField()
     key_contacts = ProspectContactSerializer(many=True, required=False)
+    company_email_verification_status = serializers.SerializerMethodField()
+    qualification_status = serializers.SerializerMethodField()
+
+    def get_qualification_status(self, obj):
+        if hasattr(obj, 'lead_qualification'):
+            return obj.lead_qualification.qualification_status
+        return None
 
     market_events = serializers.SerializerMethodField(read_only=True)
     market_event_ids = serializers.ListField(
@@ -56,9 +73,15 @@ class ProspectSerializer(serializers.ModelSerializer):
             'operational_status', 'parent_companies', 'parent_companies_detail', 'child_companies_detail', 'status_target',
             'primary_offering_type', 'products', 'services', 'solutions',
             'offerings_data', 'key_contacts', 'created_at', 'updated_at',
-            'created_by', 'updated_by', 'market_events', 'market_event_ids'
+            'created_by', 'updated_by', 'market_events', 'market_event_ids', 'company_email_verification_status', 'qualification_status'
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at', 'created_by', 'updated_by', 'market_events', 'market_event_ids']
+        read_only_fields = ['id', 'created_at', 'updated_at', 'created_by', 'updated_by', 'market_events', 'market_event_ids', 'company_email_verification_status', 'qualification_status']
+
+    def get_company_email_verification_status(self, obj):
+        if not obj.official_email_address:
+            return None
+        verification = obj.email_verifications.filter(email_address=obj.official_email_address).order_by('-updated_at').first()
+        return verification.verification_status if verification else None
 
     def get_market_events(self, obj):
         events = [p.market_event for p in obj.market_event_participations.select_related('market_event')]

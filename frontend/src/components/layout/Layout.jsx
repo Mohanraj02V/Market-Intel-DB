@@ -1,7 +1,7 @@
 import React from 'react';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { useSelector, useDispatch } from 'react-redux';
-import { LogOut, Users, Calendar, Search, Activity, ClipboardList, UserCircle } from 'lucide-react';
+import { LogOut, Users, Calendar, Search, Activity, ClipboardList, UserCircle, Mail } from 'lucide-react';
 import { logout } from '../../features/auth/authSlice';
 import NotificationCenter from './NotificationCenter';
 
@@ -23,7 +23,7 @@ const Layout = () => {
       { path: '/prospects', label: 'Prospects', icon: Users },
       { path: '/key-people', label: 'Key People', icon: UserCircle },
       { path: '/market-events', label: 'Market Events', icon: Calendar },
-      { path: '/pre-tasks', label: 'PRE Tasks', icon: ClipboardList }
+      { path: '/pre-tasks', label: 'Tasks', icon: ClipboardList }
     );
   }
   
@@ -33,7 +33,8 @@ const Layout = () => {
     );
   } else if (user?.role === 'LQ') {
     navItems.push(
-      { path: '/lq-pipeline', label: 'Lead Qualifier Pipeline', icon: Activity }
+      { path: '/lq-pipeline', label: 'Lead Qualifier Pipeline', icon: Activity },
+      { path: '/key-people', label: 'Key People', icon: UserCircle }, { path: '/inbox', label: 'Inbox', icon: Mail }
     );
   }
 

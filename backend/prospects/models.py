@@ -97,7 +97,7 @@ class LeadQualification(models.Model):
         NURTURE = 'Nurture', 'Nurture'
         DISQUALIFIED = 'Disqualified', 'Disqualified'
         BUDGET_FROZEN = 'Budget Frozen', 'Budget Frozen'
-        PROSPECT_SELECTED = 'Prospect Selected', 'Prospect Selected'
+        LEAD_QUALIFIED = 'Lead Qualified', 'Lead Qualified'
 
     class PreTaskStatus(models.TextChoices):
         NONE = 'NONE', 'None'

@@ -12,7 +12,16 @@ class EmailVerificationViewSet(viewsets.ModelViewSet):
     serializer_class = EmailVerificationSerializer
     permission_classes = [IsPREOrLQ]
 
-    @action(detail=False, methods=['post'], permission_classes=[IsLQ])
+    @action(detail=False, methods=['post'], url_path='instant-verify', permission_classes=[IsPREOrLQ])
+    def instant_verify(self, request):
+        email_address = request.data.get('email_address')
+        if not email_address:
+            return Response({'error': 'email_address is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        engine_result = verify_email_engine(email_address)
+        return Response({'verification_status': engine_result['status'], 'reason': engine_result['reason']}, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['post'], permission_classes=[IsPREOrLQ])
     def verify(self, request):
         prospect_id = request.data.get('prospect_id')
         prospect_contact_id = request.data.get('prospect_contact_id')
@@ -82,7 +91,7 @@ class EmailVerificationViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(verification)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
-    @action(detail=True, methods=['post'], permission_classes=[IsLQ])
+    @action(detail=True, methods=['post'], permission_classes=[IsPREOrLQ])
     def confirm(self, request, pk=None):
         verification = self.get_object()
 

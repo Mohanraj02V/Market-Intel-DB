@@ -1,14 +1,34 @@
-import React, { useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import { fetchProspectById, clearSelectedProspect } from '../features/prospects/prospectSlice';
 import CorporateStructureTree from '../components/prospects/CorporateStructureTree';
+import api from '../services/api';
 import { ArrowLeft, Building2, Globe, Mail, Phone, MapPin, Network, Package, Users, Calendar } from 'lucide-react';
 
 const ProspectDetailPage = () => {
   const { id } = useParams();
   const dispatch = useDispatch();
   const { selectedProspect, loading, error } = useSelector((state) => state.prospects);
+  const { user } = useSelector((state) => state.auth);
+  const [verifyingEmail, setVerifyingEmail] = useState(null);
+
+  const handleVerifyEmail = async (email, contactId = null) => {
+    try {
+      setVerifyingEmail(email);
+      await api.post('/email-verifications/verify/', {
+        prospect_id: id,
+        prospect_contact_id: contactId,
+        email_address: email
+      });
+      dispatch(fetchProspectById(id));
+    } catch (err) {
+      console.error('Failed to verify email:', err);
+      alert('Failed to verify email. Please try again.');
+    } finally {
+      setVerifyingEmail(null);
+    }
+  };
 
   useEffect(() => {
     dispatch(fetchProspectById(id));
@@ -102,7 +122,29 @@ const ProspectDetailPage = () => {
                 {p.official_email_address && (
                   <div className="overflow-hidden">
                     <dt className="text-xs font-medium text-slate-500 uppercase flex items-center gap-1"><Mail size={14}/> Email</dt>
-                    <dd className="mt-1 text-sm text-indigo-600 break-all"><a href={`mailto:${p.official_email_address}`}>{p.official_email_address}</a></dd>
+                    <dd className="mt-1 flex items-center justify-between">
+                      <a href={`mailto:${p.official_email_address}`} className="text-sm text-indigo-600 break-all hover:underline truncate mr-2">{p.official_email_address}</a>
+                      {p.company_email_verification_status ? (
+                         <span className={`shrink-0 px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                           p.company_email_verification_status === 'VALID' ? 'bg-emerald-100 text-emerald-700' :
+                           p.company_email_verification_status === 'INVALID' ? 'bg-red-100 text-red-700' :
+                           'bg-slate-100 text-slate-700'
+                         }`}>
+                           {p.company_email_verification_status}
+                         </span>
+                      ) : user?.role === 'PRE' ? (
+                        <button
+                          type="button"
+                          onClick={() => handleVerifyEmail(p.official_email_address, null)}
+                          disabled={verifyingEmail === p.official_email_address}
+                          className="shrink-0 px-2 py-0.5 bg-white border border-slate-300 text-slate-600 rounded text-[10px] font-bold hover:bg-slate-50 transition disabled:opacity-50"
+                        >
+                          {verifyingEmail === p.official_email_address ? 'Verifying...' : 'Verify'}
+                        </button>
+                      ) : (
+                        <span className="shrink-0 px-1.5 py-0.5 rounded text-[9px] font-bold bg-slate-100 text-slate-500">Unverified</span>
+                      )}
+                    </dd>
                   </div>
                 )}
                 {p.official_website_url && (
@@ -126,8 +168,12 @@ const ProspectDetailPage = () => {
                   <div key={i} className="p-3 bg-slate-50 rounded-lg border border-slate-100">
                     <div className="font-medium text-sm text-slate-900">{contact.contact_name}</div>
                     <div className="text-xs text-slate-500 mb-2">{contact.designation || 'No designation'}</div>
-                    {contact.official_email && <div className="text-xs text-slate-600"><a href={`mailto:${contact.official_email}`} className="hover:text-indigo-600">{contact.official_email}</a></div>}
-                    {contact.phone_number && <div className="text-xs text-slate-600">{contact.phone_number}</div>}
+                    {contact.official_email && (
+                      <div className="text-xs text-slate-600 flex items-center mt-1">
+                        <a href={`mailto:${contact.official_email}`} className="hover:text-indigo-600 truncate">{contact.official_email}</a>
+                      </div>
+                    )}
+                    {contact.phone_number && <div className="text-xs text-slate-600 mt-1">{contact.phone_number}</div>}
                   </div>
                 ))
               ) : (

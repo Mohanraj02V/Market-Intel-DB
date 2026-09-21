@@ -19,19 +19,34 @@ class ProspectViewSet(viewsets.ModelViewSet):
             permission_classes = [IsPRE]
         return [permission() for permission in permission_classes]
 
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+
+        filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['company_structure', 'operational_status', 'country_head_office', 'primary_offering_type']
     search_fields = ['company_name', 'country_head_office', 'primary_industries']
     ordering_fields = ['company_name', 'created_at', 'updated_at']
 
     def get_queryset(self):
         queryset = Prospect.objects.all().order_by('-updated_at')
+        
+        # Role-based filtering for PRE
+        user = self.request.user
+        if not user.is_superuser and hasattr(user, 'profile') and user.profile.role == 'PRE':
+            queryset = queryset.filter(created_by=user.username)
+            
         market_event = self.request.query_params.get('market_event')
         if market_event:
             queryset = queryset.filter(market_event_participations__market_event=market_event).distinct()
         return queryset
 
     def create(self, request, *args, **kwargs):
+        # Duplicate validation by exact company name (case-insensitive)
+        company_name = request.data.get('company_name')
+        if company_name and Prospect.objects.filter(company_name__iexact=company_name.strip()).exists():
+            return Response(
+                {'error': 'A prospect with this company name has already been entered.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
         serializer = self.get_serializer(data=request.data)
         if not serializer.is_valid():
             print("VALIDATION ERROR:", serializer.errors)
@@ -41,7 +56,7 @@ class ProspectViewSet(viewsets.ModelViewSet):
         return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
     def perform_create(self, serializer):
-        serializer.save()
+        serializer.save(created_by=self.request.user.username)
 
     @action(detail=True, methods=['post'], url_path='add-contact')
     def add_contact(self, request, pk=None):
@@ -78,9 +93,78 @@ class LQPipelineViewSet(viewsets.ModelViewSet):
     serializer_class = LeadQualificationSerializer
     permission_classes = [IsPREOrLQ]
     def get_queryset(self):
-        return LeadQualification.objects.all().select_related('prospect').order_by('-updated_at')
+        queryset = LeadQualification.objects.all().select_related('prospect').order_by('-updated_at')
+        user = self.request.user
+        if not user.is_superuser and hasattr(user, 'profile') and user.profile.role == 'PRE':
+            queryset = queryset.filter(prospect__created_by=user.username)
+        return queryset
 
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+
+    def _evaluate_qualification_status(self, lq):
+        from .models import CallActivity, ProspectContact, LeadQualification
+        from django.utils import timezone
+        import datetime
+        
+        contacts = ProspectContact.objects.filter(prospect=lq.prospect)
+        if not contacts.exists():
+            return
+            
+        all_lead_qualified = True
+        all_not_interested = True
+        latest_not_interested_date = None
+        
+        for contact in contacts:
+            latest_call = CallActivity.objects.filter(prospect_contact=contact).order_by('-created_at').first()
+            if not latest_call:
+                all_lead_qualified = False
+                all_not_interested = False
+                break
+                
+            if latest_call.communication_outcome != 'Lead Qualified':
+                all_lead_qualified = False
+            if latest_call.communication_outcome != 'Not Interested':
+                all_not_interested = False
+            else:
+                if latest_not_interested_date is None or latest_call.created_at > latest_not_interested_date:
+                    latest_not_interested_date = latest_call.created_at
+
+        updated = False
+        if all_lead_qualified and lq.qualification_status != LeadQualification.QualificationStatus.LEAD_QUALIFIED:
+            lq.qualification_status = LeadQualification.QualificationStatus.LEAD_QUALIFIED
+            updated = True
+            
+        if all_not_interested and latest_not_interested_date:
+            if timezone.now() >= latest_not_interested_date + datetime.timedelta(days=30):
+                if lq.qualification_status != LeadQualification.QualificationStatus.BUDGET_FROZEN:
+                    lq.qualification_status = LeadQualification.QualificationStatus.BUDGET_FROZEN
+                    updated = True
+        elif not all_not_interested and not all_lead_qualified:
+            # Revert to UNQUALIFIED if consensus is broken
+            if lq.qualification_status in [LeadQualification.QualificationStatus.LEAD_QUALIFIED, LeadQualification.QualificationStatus.BUDGET_FROZEN]:
+                lq.qualification_status = LeadQualification.QualificationStatus.UNQUALIFIED
+                updated = True
+
+        if updated:
+            lq.save(update_fields=['qualification_status'])
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        for lq in queryset:
+            self._evaluate_qualification_status(lq)
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
+
+    def retrieve(self, request, *args, **kwargs):
+        instance = self.get_object()
+        self._evaluate_qualification_status(instance)
+        serializer = self.get_serializer(instance)
+        return Response(serializer.data)
+
+        filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['verification_status', 'pre_task_status', 'qualification_status']
     search_fields = ['prospect__company_name', 'prospect__country_head_office', 'prospect__primary_industries']
     ordering_fields = ['created_at', 'updated_at', 'qualification_score']
@@ -145,7 +229,7 @@ class CallbackReminderViewSet(viewsets.ModelViewSet):
         return CallbackReminder.objects.filter(is_completed=False).order_by('scheduled_datetime')
 
     def perform_create(self, serializer):
-        serializer.save()
+        serializer.save(created_by=self.request.user.username)
 
     @action(detail=False, methods=['get'], url_path='pending')
     def pending(self, request):
@@ -170,10 +254,15 @@ class ProspectContactViewSet(viewsets.ModelViewSet):
     serializer_class = ProspectContactSerializer
     permission_classes = [IsPREOrLQ]
     def get_queryset(self):
-        return ProspectContact.objects.all().select_related('prospect').order_by('-created_at')
+        queryset = ProspectContact.objects.all().select_related('prospect').order_by('-created_at')
+        user = self.request.user
+        if not user.is_superuser and hasattr(user, 'profile') and user.profile.role == 'PRE':
+            queryset = queryset.filter(prospect__created_by=user.username)
+        return queryset
 
     def perform_create(self, serializer):
-        serializer.save()
+        serializer.save(created_by=self.request.user.username)
+
 
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['contact_name', 'official_email', 'prospect__company_name']
@@ -193,24 +282,27 @@ class CommunicationActivityViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [IsPREOrLQ]
 
     def get_queryset(self):
-        if hasattr(self.request.user, 'profile') and self.request.user.profile.role != 'LQ':
-            return CommunicationActivity.objects.none()
         queryset = CommunicationActivity.objects.all().order_by('-created_at')
         prospect_id = self.request.query_params.get('prospect')
+        contact_id = self.request.query_params.get('contact')
         if prospect_id:
             queryset = queryset.filter(prospect_id=prospect_id)
+        if contact_id:
+            queryset = queryset.filter(prospect_contact_id=contact_id)
         return queryset
 
 class CallActivityViewSet(viewsets.ModelViewSet):
     serializer_class = CallActivitySerializer
+    permission_classes = [IsPREOrLQ]
 
     def get_queryset(self):
-        if hasattr(self.request.user, 'profile') and self.request.user.profile.role != 'LQ':
-            return CallActivity.objects.none()
         queryset = CallActivity.objects.all().order_by('-created_at')
         prospect_id = self.request.query_params.get('prospect')
+        contact_id = self.request.query_params.get('contact')
         if prospect_id:
             queryset = queryset.filter(prospect_id=prospect_id)
+        if contact_id:
+            queryset = queryset.filter(prospect_contact_id=contact_id)
         return queryset
 
     def perform_create(self, serializer):
@@ -296,14 +388,7 @@ class OutreachEmailViewSet(viewsets.ModelViewSet):
             email = rcpt.get('email_address')
             contact_id = rcpt.get('prospect_contact')
 
-            # Check verification
-            verification = EmailVerification.objects.filter(prospect=prospect, email_address=email).order_by('-updated_at').first()
-            if not verification:
-                return Response({'error': f'Recipient {email} is unverified.'}, status=status.HTTP_400_BAD_REQUEST)
-            if verification.verification_status != 'VALID':
-                return Response({'error': f'Recipient {email} verification is {verification.verification_status}.'}, status=status.HTTP_400_BAD_REQUEST)
-            if not verification.confirmed_by_lq:
-                return Response({'error': f'Recipient {email} verification is valid but not confirmed by LQ.'}, status=status.HTTP_400_BAD_REQUEST)
+            # Verification check removed per user request
 
             rtype = rcpt.get('recipient_type', 'TO').upper()
             if rtype == 'TO': to_emails.append(email)
