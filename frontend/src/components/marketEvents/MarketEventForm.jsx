@@ -98,8 +98,8 @@ const MarketEventForm = ({ isOpen, onClose, initialData = null }) => {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 overflow-hidden flex bg-slate-900/50 backdrop-blur-sm">
-      <div className="absolute inset-y-0 right-0 w-full max-w-2xl bg-white shadow-xl flex flex-col sm:rounded-l-2xl animate-in slide-in-from-right duration-300">
+    <div className="fixed inset-0 z-50 overflow-hidden flex items-center justify-center p-4 sm:p-6 bg-slate-900/50 backdrop-blur-sm">
+      <div className="relative w-full max-w-2xl max-h-full bg-white shadow-xl flex flex-col rounded-2xl animate-in fade-in zoom-in-95 duration-300">
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
           <h2 className="text-xl font-semibold text-slate-800">
             {initialData ? 'Edit Market Event' : 'Add Market Event'}

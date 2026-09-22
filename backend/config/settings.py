@@ -104,3 +104,6 @@ CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "http://localhost:3000",
 ]
+
+# Email open tracking – set to your public backend URL (e.g. Cloudflare tunnel)
+EMAIL_TRACKING_BASE_URL = os.getenv('EMAIL_TRACKING_BASE_URL', 'http://localhost:8000').rstrip('/')

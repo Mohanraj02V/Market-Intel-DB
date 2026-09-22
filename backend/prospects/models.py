@@ -181,6 +181,11 @@ class OutreachEmail(models.Model):
     thread_id = models.CharField(max_length=255, blank=True, null=True)
     in_reply_to = models.CharField(max_length=255, blank=True, null=True)
     references = models.TextField(blank=True, null=True)
+    # Email open tracking
+    tracking_token = models.UUIDField(default=uuid.uuid4, unique=True, db_index=True, editable=False)
+    is_opened = models.BooleanField(default=False)
+    opened_at = models.DateTimeField(null=True, blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

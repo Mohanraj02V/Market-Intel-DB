@@ -269,9 +269,10 @@ class OutreachEmailSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'prospect', 'created_by', 'sender_mail_account', 'from_email', 'from_name',
             'subject', 'body', 'signature', 'status', 'sent_at', 'message_id', 'thread_id',
-            'in_reply_to', 'references', 'created_at', 'updated_at', 'recipients', 'attachments'
+            'in_reply_to', 'references', 'created_at', 'updated_at', 'recipients', 'attachments',
+            'is_opened', 'opened_at'
         ]
-        read_only_fields = ['id', 'created_by', 'sender_mail_account', 'status', 'sent_at', 'message_id', 'thread_id', 'in_reply_to', 'references', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_by', 'sender_mail_account', 'status', 'sent_at', 'message_id', 'thread_id', 'in_reply_to', 'references', 'created_at', 'updated_at', 'is_opened', 'opened_at']
 
 class CallActivitySerializer(serializers.ModelSerializer):
     created_by_name = serializers.SerializerMethodField()

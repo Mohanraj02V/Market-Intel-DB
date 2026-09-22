@@ -424,9 +424,12 @@ class OutreachEmailViewSet(viewsets.ModelViewSet):
         recipients_data = request.data.get('recipients', [])
 
         # Create EmailMessage
+        from email.utils import formatdate
         msg = EmailMessage()
         msg['Subject'] = subject
         msg['From'] = f"{mail_account.display_name} <{mail_account.email_address}>"
+        msg['Reply-To'] = mail_account.email_address
+        msg['Date'] = formatdate(localtime=True)
 
         to_emails = []
         cc_emails = []
@@ -459,11 +462,31 @@ class OutreachEmailViewSet(viewsets.ModelViewSet):
         msg_id = make_msgid(domain=mail_account.email_address.split('@')[-1] if '@' in mail_account.email_address else 'local')
         msg['Message-ID'] = msg_id
 
+        # Email open tracking
+        import uuid
+        from django.conf import settings
+        import html
+        tracking_token = uuid.uuid4()
+        tracking_url = f"{settings.EMAIL_TRACKING_BASE_URL}/api/email-tracking/{tracking_token}/"
+
         full_body = body
         if mail_account.default_signature:
             full_body += f"\n\n{mail_account.default_signature}"
 
         msg.set_content(full_body)
+        
+        # HTML alternative with tracking pixel
+        html_body = html.escape(body).replace('\n', '<br>')
+        html_signature = ""
+        if mail_account.default_signature:
+            sig_safe = html.escape(mail_account.default_signature).replace('\n', '<br>')
+            html_signature = f"\n<div>\n{sig_safe}\n</div>\n"
+
+        html_content = f"""<html><body>
+<div style="font-family: sans-serif;">{html_body}</div><br>{html_signature}
+<img src="{tracking_url}" width="1" height="1" alt="" style="display:none;width:1px;height:1px;border:0;">
+</body></html>"""
+        msg.add_alternative(html_content, subtype='html')
 
         # Handle Attachments
         files = request.FILES.getlist('attachments')
@@ -522,7 +545,8 @@ class OutreachEmailViewSet(viewsets.ModelViewSet):
             status='WAITING FOR RESPONSE',
             sent_at=timezone.now(),
             message_id=msg_id,
-            thread_id=msg_id
+            thread_id=msg_id,
+            tracking_token=tracking_token
         )
 
         for rcpt in recipients_data:
@@ -566,3 +590,22 @@ class OutreachEmailViewSet(viewsets.ModelViewSet):
 
         serializer = self.get_serializer(outreach_email)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+from django.views import View
+from django.http import HttpResponse
+
+class EmailTrackingView(View):
+    def get(self, request, tracking_token, *args, **kwargs):
+        # 1x1 transparent GIF base64 decoded
+        PIXEL_GIF_DATA = b'GIF89a\x01\x00\x01\x00\x80\x00\x00\xff\xff\xff\x00\x00\x00!\xf9\x04\x01\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;'
+
+        try:
+            email = OutreachEmail.objects.filter(tracking_token=tracking_token).first()
+            if email and not email.is_opened:
+                email.is_opened = True
+                email.opened_at = timezone.now()
+                email.save(update_fields=['is_opened', 'opened_at'])
+        except Exception:
+            pass  # Fail silently to avoid leaking info or breaking the pixel
+
+        return HttpResponse(PIXEL_GIF_DATA, content_type='image/gif')

@@ -206,6 +206,7 @@ export default function LqWorkspaceModal({
     setCallError('');
   }, [selectedContactId]);
   const isEmailSent = ['Sent', 'Waiting for Response', 'Received Response'].includes(emailProgress);
+  const sentEmailData = outreachLogs.find(log => log.activity_type === 'EMAIL_SENT')?.outreach_email_detail;
 
   const toggleToRecipient = (email) => {
     if (toEmails.includes(email)) setToEmails(toEmails.filter(e => e !== email));
@@ -710,6 +711,16 @@ const handleAddCustomRecipient = (e) => {
                               emailProgress === 'Received Response' ? 'bg-sky-500/20 text-sky-300 border-sky-400/30' :
                               'bg-slate-700 text-slate-300 border-slate-600'
                             }`}>Status: {emailProgress}</span>
+                            {/* Email open tracking indicator */}
+                            {isEmailSent && (
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-extrabold uppercase border ${
+                                sentEmailData?.is_opened
+                                  ? 'bg-emerald-500/20 text-emerald-300 border-emerald-400/30'
+                                  : 'bg-slate-700 text-slate-300 border-slate-600'
+                              }`}>
+                                {sentEmailData?.is_opened ? '👁 Viewed' : 'Not Viewed'}
+                              </span>
+                            )}
                           </div>
                           <p className="text-xs text-slate-300 mt-0.5">{isEmailSent ? 'Email dispatched to prospect recipients.' : 'Send introductory email to enable call outcomes.'}</p>
                         </div>
@@ -800,10 +811,7 @@ const handleAddCustomRecipient = (e) => {
                               </label>
                             ))}
                           </div>
-                          <div className="flex items-center gap-2 pt-1">
-                            <input type="email" value={customRecipientInput} onChange={(e) => setCustomRecipientInput(e.target.value)} disabled={isEmailSent} placeholder="Add additional email address..." className="flex-1 p-2 bg-white border border-slate-200 rounded-xl text-xs font-medium disabled:bg-slate-100 disabled:text-slate-500" />
-                            <button type="button" onClick={handleAddCustomRecipient} disabled={isEmailSent} className="px-3 py-2 bg-slate-800 hover:bg-slate-900 disabled:bg-slate-400 disabled:cursor-not-allowed text-white font-bold rounded-xl text-xs cursor-pointer transition">Add Recipient</button>
-                          </div>
+
                         </div>
                         <div>
                           <label className="block font-extrabold text-slate-800 mb-1 uppercase tracking-wider text-[10px]">Email Subject</label>

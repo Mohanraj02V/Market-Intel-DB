@@ -1,6 +1,6 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import ProspectViewSet, LQPipelineViewSet, CallbackReminderViewSet, ProspectContactViewSet, CommunicationActivityViewSet, CallActivityViewSet, OutreachEmailViewSet
+from .views import ProspectViewSet, LQPipelineViewSet, CallbackReminderViewSet, ProspectContactViewSet, CommunicationActivityViewSet, CallActivityViewSet, OutreachEmailViewSet, EmailTrackingView
 from .verification_views import EmailVerificationViewSet
 
 router = DefaultRouter()
@@ -15,5 +15,6 @@ router.register(r'outreach/emails', OutreachEmailViewSet, basename='outreach-ema
 router.register(r'email-verifications', EmailVerificationViewSet, basename='email-verifications')
 
 urlpatterns = [
+    path('email-tracking/<uuid:tracking_token>/', EmailTrackingView.as_view(), name='email-tracking'),
     path('', include(router.urls)),
 ]
